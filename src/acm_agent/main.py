@@ -1,6 +1,7 @@
 import os
 
 from dotenv import load_dotenv
+from acm_agent.tools.judge_tools import judge_cpp
 
 from agents import (
     Agent,
@@ -13,28 +14,42 @@ from acm_agent.tools.cpp_tools import (
     compile_cpp,
     run_cpp,
 )
-
+tools=[
+    compile_cpp,
+    run_cpp,
+    judge_cpp,
+],
 
 def read_user_input() -> str:
-    first_line = input("You > ").strip()
-
-    if first_line != "/paste":
-        return first_line
-
-    print("\nPaste your multi-line content.")
-    print("Type /end on a NEW LINE when finished.\n")
-
-    lines: list[str] = []
-
     while True:
-        line = input()
+        first_line = input("You > ").strip()
 
-        if line.strip() == "/end":
-            break
+        # 忽略空输入，不让主循环反复打印奇怪的提示
+        if not first_line:
+            continue
 
-        lines.append(line)
+        if first_line != "/paste":
+            return first_line
 
-    return "\n".join(lines)
+        print("\nPaste your multi-line content.")
+        print("Type /end on a NEW LINE when finished.\n")
+
+        lines: list[str] = []
+
+        while True:
+            line = input()
+
+            if line.strip() == "/end":
+                break
+
+            lines.append(line)
+
+        content = "\n".join(lines).strip()
+
+        if content:
+            return content
+
+        print("Nothing was pasted. Try again.\n")
 
 
 def main() -> None:
@@ -47,37 +62,36 @@ def main() -> None:
     set_tracing_disabled(True)
 
     coach = Agent(
-        name="ACM Coach",
-        model=os.environ["OPENAI_MODEL"],
-        instructions="""
+    name="ACM Coach",
+
+    model=os.environ["OPENAI_MODEL"],
+
+    instructions="""
 You are an expert competitive programming coach.
 
 The user is experienced with C++ and competitive programming.
 
-You have tools that can compile and execute C++ code.
+Tool rules:
 
-IMPORTANT TOOL RULES:
+- If the user asks you to check whether C++ code compiles,
+  use compile_cpp.
 
-- If the user explicitly asks you to compile C++ code,
-  you MUST call compile_cpp.
+- If the user asks you to run already compiled code,
+  use run_cpp.
 
-- If the user explicitly asks you to execute C++ code,
-  you MUST first call compile_cpp.
-  If compilation succeeds, call run_cpp.
+- Prefer judge_cpp when the user provides both
+  C++ source code and concrete input data.
 
-- Never claim that code was compiled or executed unless
-  you actually used the corresponding tool.
-
-- If compilation fails, use the actual compiler stderr
-  returned by compile_cpp to explain the exact error.
-
-- Successful compilation does not prove algorithmic correctness.
+- Never claim code was compiled or executed unless
+  you actually used a tool.
 """,
-        tools=[
-            compile_cpp,
-            run_cpp,
-        ],
-    )
+
+    tools=[
+        compile_cpp,
+        run_cpp,
+        judge_cpp,
+    ],
+)
 
     print("ACM Coach")
     print("Type 'exit' to quit.")
@@ -97,10 +111,18 @@ IMPORTANT TOOL RULES:
             coach,
             question,
         )
+        print("\n[debug] final_output =", repr(result.final_output))
+        print("[debug] new_items:")
+
+        for item in result.new_items:
+            print("  -", type(item).__name__)
 
         print("\nACM Coach >")
-        print(result.final_output)
-        print()
+
+        if result.final_output:
+            print(result.final_output)
+        else:
+            print("[no final output]")
 
 
 if __name__ == "__main__":
