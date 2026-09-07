@@ -7,10 +7,13 @@ authors = [
     { name = "Ehahaha1015", email = "3143448051@qq.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "openai-agents>=0.22.0",
+    "python-dotenv>=1.2.3",
+]
 
 [project.scripts]
-acm-agent = "acm_agent:main"
+acm-agent = "acm_agent.main:main"
 
 [build-system]
 requires = ["uv_build>=0.12.10,<0.13.0"]
