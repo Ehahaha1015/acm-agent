@@ -22,7 +22,7 @@ def compile_cpp(code: str) -> str:
     Returns:
         Compilation result including compiler errors and warnings.
     """
-
+    print("\n[tool] compile_cpp called")
     WORKSPACE.mkdir(parents=True, exist_ok=True)
 
     SOURCE_FILE.write_text(
