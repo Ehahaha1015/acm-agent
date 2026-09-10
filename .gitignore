@@ -1,26 +1,10 @@
-# Python cache
-__pycache__/
-*.py[cod]
-
-# Virtual environment
 .venv/
-
-# Environment variables / secrets
-.env
-
-# Test and lint caches
+__pycache__/
+*.pyc
 .pytest_cache/
 .ruff_cache/
-.mypy_cache/
-
-# IDE
-.vscode/
-.idea/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# ACM Agent runtime files
+.env
 workspace/
-workspace/
+.acm-agent-work/
+output/
+dist/

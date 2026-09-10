@@ -1,0 +1,110 @@
+:root {
+  color-scheme: dark;
+  --bg: #090b10;
+  --panel: #0f1219;
+  --soft: #171b24;
+  --line: #272d3a;
+  --text: #ecf0f8;
+  --muted: #929bad;
+  --accent: #7c5cff;
+  --accent-2: #31d5c8;
+  --danger: #ff6b7a;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; }
+button, textarea { font: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+/* The shell must be exactly one viewport tall and must NOT size its single row from
+   content: an auto row would let .chat-panel (height:100%) resolve to its content
+   height, so .messages never scrolls and everything below the fold becomes unreachable.
+   100dvh keeps the composer visible while a mobile URL bar shows/hides. */
+.app-shell {
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-columns: 270px 1fr;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+}
+.sidebar { padding: 26px 20px; background: #0c0f15; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 28px; min-height: 0; overflow-y: auto; }
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand-mark { width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center; font: 800 20px ui-monospace, monospace; background: linear-gradient(135deg, var(--accent), #4b8cff); box-shadow: 0 8px 28px #725bff45; }
+.brand strong, .brand span { display: block; }
+.brand strong { font-size: 17px; letter-spacing: .2px; }
+.brand span { color: var(--muted); font-size: 10px; margin-top: 3px; text-transform: uppercase; letter-spacing: .7px; }
+.new-chat { width: 100%; padding: 12px 14px; border: 1px solid #6f5af0; border-radius: 11px; color: #ddd8ff; background: #745bff1a; cursor: pointer; text-align: left; transition: .2s; }
+.new-chat:hover { background: #745bff2d; transform: translateY(-1px); }
+.new-chat span { margin-right: 8px; }
+.capabilities { display: flex; flex-direction: column; gap: 11px; }
+.capabilities p { margin: 0 0 4px; color: #667087; font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; }
+.capabilities span { color: #aeb6c6; font-size: 13px; padding-left: 13px; border-left: 2px solid #2c3342; }
+.server-state { margin-top: auto; color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 8px; }
+.server-state i { width: 8px; height: 8px; border-radius: 50%; background: #f3b44b; box-shadow: 0 0 8px currentColor; }
+.server-state i.online { background: #36d399; }
+.server-state i.offline { background: var(--danger); }
+.chat-panel { min-width: 0; height: 100%; min-height: 0; display: grid; grid-template-rows: 72px minmax(0, 1fr) auto; background: radial-gradient(circle at 50% 20%, #16152b 0, var(--bg) 37%); }
+header { border-bottom: 1px solid var(--line); padding: 0 30px; display: flex; align-items: center; gap: 15px; backdrop-filter: blur(14px); background: #090b10d9; }
+header h1, header p { margin: 0; }
+header h1 { font-size: 15px; }
+header p { margin-top: 3px; color: var(--muted); font-size: 11px; }
+header a { margin-left: auto; color: #a9b2c4; font-size: 12px; text-decoration: none; }
+.icon-button { display: none; border: 0; color: var(--text); background: transparent; font-size: 22px; cursor: pointer; }
+/* min-height:0 + overscroll-behavior keep this the one and only vertical scroller. */
+.messages { min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 42px max(26px, calc((100% - 860px) / 2)); scroll-behavior: smooth; }
+.welcome { max-width: 760px; margin: 10vh auto 0; text-align: center; animation: rise .45s ease-out; }
+.hero-mark { width: 58px; height: 58px; margin: 0 auto 22px; display: grid; place-items: center; color: #d8d2ff; background: linear-gradient(145deg, #7b5cff3d, #31d5c81c); border: 1px solid #7061c866; border-radius: 17px; font: 700 18px ui-monospace, monospace; }
+.welcome h2 { margin: 0; font-size: clamp(24px, 4vw, 36px); letter-spacing: -.7px; }
+.welcome > p { max-width: 600px; margin: 16px auto 30px; color: var(--muted); line-height: 1.7; font-size: 14px; }
+.suggestions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.suggestions button { padding: 16px 13px; color: #c8cede; background: #11151dcc; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; transition: .2s; }
+.suggestions button:hover { border-color: #6e5be1; color: white; transform: translateY(-2px); }
+.message { display: flex; gap: 12px; margin-bottom: 26px; animation: rise .25s ease-out; }
+.message.user { justify-content: flex-end; }
+.avatar { flex: 0 0 32px; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 10px; background: #755cff; font-size: 12px; font-weight: 800; }
+.bubble { max-width: min(78%, 720px); padding: 13px 16px; background: var(--soft); border: 1px solid var(--line); border-radius: 4px 15px 15px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; font-size: 14px; }
+.user .bubble { order: -1; color: #f4f1ff; background: #6149cc; border-color: #735cdb; border-radius: 15px 4px 15px 15px; }
+.bubble code { font-family: "Cascadia Code", Consolas, monospace; }
+.bubble > pre { margin: 11px 0 3px; padding: 13px 14px; overflow: auto; color: #d8dfed; background: #090c12; border: 1px solid #293142; border-radius: 10px; white-space: pre; line-height: 1.55; }
+.bubble > pre code::before { content: attr(data-language); display: block; margin-bottom: 8px; color: #737f94; font: 10px Inter, sans-serif; text-transform: uppercase; }
+.bubble > pre code:not([data-language])::before { display: none; }
+.tool-result { margin-top: 12px; padding: 11px 12px; background: #090c12; border: 1px solid #2b3444; border-radius: 9px; }
+.tool-result summary { color: var(--accent-2); cursor: pointer; font-size: 12px; font-weight: 700; }
+.tool-result pre { overflow: auto; margin: 10px 0 0; color: #b8c2d5; font-size: 11px; white-space: pre-wrap; }
+.typing span { display: inline-block; width: 6px; height: 6px; margin: 0 2px; border-radius: 50%; background: #9891bd; animation: blink 1.2s infinite; }
+.typing span:nth-child(2) { animation-delay: .16s; }.typing span:nth-child(3) { animation-delay: .32s; }
+.composer-wrap { padding: 14px max(26px, calc((100% - 860px) / 2)) 18px; background: linear-gradient(transparent, var(--bg) 22%); }
+.composer { border: 1px solid #343b4a; border-radius: 17px; background: #12161e; box-shadow: 0 18px 45px #0008; transition: .2s; }
+.composer:focus-within { border-color: #725ee0; box-shadow: 0 18px 45px #0008, 0 0 0 3px #755cff17; }
+textarea { display: block; width: 100%; max-height: 260px; resize: none; padding: 17px 18px 7px; border: 0; outline: none; color: var(--text); background: transparent; line-height: 1.5; }
+textarea::placeholder { color: #6f788a; }
+.composer-bottom { padding: 6px 9px 9px 18px; display: flex; align-items: center; }
+.composer-bottom span { color: #626c7d; font-size: 10px; }
+.composer-bottom button { margin-left: auto; width: 36px; height: 36px; border: 0; border-radius: 11px; color: white; background: var(--accent); cursor: pointer; transition: .2s; }
+.composer-bottom button:hover { filter: brightness(1.12); }.composer-bottom button:disabled { opacity: .45; cursor: wait; }
+.notice { margin: 9px 0 0; color: #5f6878; text-align: center; font-size: 10px; }
+.overlay { display: none; }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+@keyframes blink { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+
+@media (max-width: 760px) {
+  body { overflow: hidden; }
+  .app-shell { grid-template-columns: 1fr; }
+  .sidebar { position: fixed; inset: 0 auto 0 0; z-index: 20; width: 270px; transform: translateX(-100%); transition: .25s; }
+  body.menu-open .sidebar { transform: translateX(0); }
+  .overlay { position: fixed; inset: 0; z-index: 10; background: #0009; }
+  body.menu-open .overlay { display: block; }
+  .icon-button { display: block; }
+  .chat-panel { width: 100%; }
+  header { padding: 0 18px; }
+  header > div { min-width: 0; }
+  header a { display: none; }
+  .messages { width: 100%; padding: 28px 16px; }
+  .welcome { width: 100%; margin-top: 4vh; }
+  .welcome > p { padding: 0 4px; }
+  .suggestions { grid-template-columns: 1fr; }
+  .bubble { max-width: 88%; }
+  .composer-wrap { width: 100%; min-width: 0; padding: 10px 12px 13px; }
+  .composer { width: 100%; }
+}

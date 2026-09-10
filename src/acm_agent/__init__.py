@@ -1,2 +1,3 @@
-def main() -> None:
-    print("Hello from acm-agent!")
+"""ACM Agent package."""
+
+__version__ = "0.1.0"

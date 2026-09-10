@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="ACM Agent — 使用真实 C++ 工具的算法竞赛教练">
+  <title>ACM Agent</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">A</div>
+        <div><strong>ACM Agent</strong><span>Competitive Programming Coach</span></div>
+      </div>
+      <button id="new-chat" class="new-chat" type="button"><span>＋</span> 新对话</button>
+      <div class="capabilities">
+        <p>可用能力</p>
+        <span>C++20 编译运行</span>
+        <span>复杂度与边界分析</span>
+        <span>差分测试</span>
+        <span>随机 Stress Testing</span>
+      </div>
+      <div class="server-state"><i id="status-dot"></i><span id="status-text">正在连接服务…</span></div>
+    </aside>
+
+    <main class="chat-panel">
+      <header>
+        <button id="menu-button" class="icon-button" aria-label="打开菜单">☰</button>
+        <div><h1>算法竞赛教练</h1><p>分析 · 验证 · 找反例</p></div>
+        <a href="/docs" target="_blank" rel="noreferrer">API 文档 ↗</a>
+      </header>
+
+      <section id="messages" class="messages" aria-live="polite">
+        <div id="welcome" class="welcome">
+          <div class="hero-mark">&lt;/&gt;</div>
+          <h2>今天想解决什么算法问题？</h2>
+          <p>粘贴题面、C++20 代码或测试数据。我会在需要时调用真实工具验证，而不是假装运行过代码。</p>
+          <div class="suggestions">
+            <button type="button" data-prompt="请分析下面算法的正确性与时间复杂度：\n\n">分析算法与复杂度</button>
+            <button type="button" data-prompt="请真实编译并运行下面的 C++ 代码。\n\n```cpp\n\n```\n\n输入: ```\n\n```">编译运行 C++</button>
+            <button type="button" data-prompt="请对下面的 Candidate 和 Reference 做差分测试。\n\nCandidate:\n```cpp\n\n```\n\nReference:\n```cpp\n\n```\n\n输入: ```\n\n```">寻找 WA 反例</button>
+          </div>
+        </div>
+      </section>
+
+      <footer class="composer-wrap">
+        <form id="chat-form" class="composer">
+          <textarea id="message-input" rows="1" placeholder="粘贴题面、C++ 代码或测试数据…" aria-label="消息" required></textarea>
+          <div class="composer-bottom">
+            <span>Enter 发送 · Shift + Enter 换行</span>
+            <button id="send-button" type="submit" aria-label="发送消息">➜</button>
+          </div>
+        </form>
+        <p class="notice">本地执行仅适用于可信代码 · 有限测试不能证明程序一定正确</p>
+      </footer>
+    </main>
+  </div>
+  <div id="overlay" class="overlay"></div>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

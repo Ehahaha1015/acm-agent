@@ -1,116 +1,105 @@
-import subprocess
-import tempfile
-from pathlib import Path
+from __future__ import annotations
 
-from agents import function_tool
-
-
-MAX_OUTPUT_CHARS = 6000
-
-
-def truncate(text: str) -> str:
-    if len(text) <= MAX_OUTPUT_CHARS:
-        return text
-
-    return text[:MAX_OUTPUT_CHARS] + "\n...[output truncated]"
+from acm_agent.execution.backend import BackendUnavailable
+from acm_agent.tools._support import (
+    Progress,
+    backend,
+    compile_timeout,
+    notify,
+    run_timeout,
+    sandbox_unavailable,
+)
 
 
-@function_tool
 def judge_cpp(
     code: str,
-    input_data: str = "",
-) -> str:
-    """
-    Compile and execute a C++ program in one isolated temporary directory.
+    input_data: str,
+    timeout: float | None = None,
+    progress: Progress | None = None,
+) -> dict:
+    """Compile and run one submission against one input on the active backend."""
+    try:
+        engine = backend()
+        with engine.workspace() as workspace:
+            notify(progress, stage="compile", backend=engine.name)
+            compiled = engine.compile(workspace, code, timeout=compile_timeout(None))
+            if compiled.status != "COMPILE_OK":
+                notify(progress, stage="compile_failed", status=compiled.status)
+                return {
+                    "status": "COMPILE_TIMEOUT" if compiled.status == "COMPILE_TIMEOUT" else "COMPILE_ERROR",
+                    "compile": compiled.to_dict(),
+                    "stdout": "",
+                    "stderr": compiled.stderr,
+                }
+            notify(progress, stage="run", timeout=run_timeout(timeout))
+            result = engine.run(workspace, compiled, input_data, timeout=run_timeout(timeout))
+            notify(progress, stage="ran", status=result.status)
+            return {"status": result.status, **result.to_dict()}
+    except BackendUnavailable as exc:
+        return sandbox_unavailable(exc)
 
-    Args:
-        code:
-            Complete C++ source code.
 
-        input_data:
-            Standard input passed to the program.
+def normalize_output(output: str) -> str:
+    return " ".join(output.split())
 
-    Returns:
-        Compilation or execution result including stdout,
-        stderr and exit code.
-    """
 
-    print("\n[tool] judge_cpp called")
-
-    with tempfile.TemporaryDirectory(
-        prefix="acm_agent_"
-    ) as temp_dir:
-
-        temp_path = Path(temp_dir)
-
-        source_file = temp_path / "main.cpp"
-        binary_file = temp_path / "main"
-
-        source_file.write_text(
-            code,
-            encoding="utf-8",
-        )
-
-        compile_command = [
-            "g++",
-            str(source_file),
-            "-std=c++20",
-            "-O2",
-            "-pipe",
-            "-Wall",
-            "-Wextra",
-            "-o",
-            str(binary_file),
-        ]
-
-        try:
-            compile_result = subprocess.run(
-                compile_command,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-
-        except subprocess.TimeoutExpired:
-            return (
-                "STATUS: COMPILE_TIMEOUT\n"
-                "Compilation exceeded 10 seconds."
-            )
-
-        if compile_result.returncode != 0:
-            return (
-                "STATUS: COMPILE_ERROR\n\n"
-                f"Exit code: {compile_result.returncode}\n\n"
-                "stderr:\n"
-                f"{truncate(compile_result.stderr)}"
-            )
-
-        try:
-            run_result = subprocess.run(
-                [str(binary_file)],
-                input=input_data,
-                capture_output=True,
-                text=True,
-                timeout=3,
-            )
-
-        except subprocess.TimeoutExpired:
-            return (
-                "STATUS: TIME_LIMIT_EXCEEDED\n"
-                "Execution exceeded 3 seconds."
-            )
-
-        stdout = truncate(run_result.stdout)
-        stderr = truncate(run_result.stderr)
-
-        if run_result.returncode != 0:
-            status = "RUNTIME_ERROR"
-        else:
-            status = "OK"
-
-        return (
-            f"STATUS: {status}\n"
-            f"Exit code: {run_result.returncode}\n\n"
-            f"stdout:\n{stdout or '(empty)'}\n\n"
-            f"stderr:\n{stderr or '(empty)'}"
-        )
+def compare_cpp(
+    candidate_code: str,
+    reference_code: str,
+    test_cases: list[str],
+    timeout: float | None = None,
+    progress: Progress | None = None,
+) -> dict:
+    """Differential-test candidate against reference on explicit cases."""
+    try:
+        engine = backend()
+        with engine.workspace() as candidate_ws, engine.workspace() as reference_ws:
+            notify(progress, stage="compile", target="candidate")
+            candidate = engine.compile(candidate_ws, candidate_code, timeout=compile_timeout(None))
+            if candidate.status != "COMPILE_OK":
+                return {
+                    "status": f"CANDIDATE_{candidate.status}",
+                    "compile": candidate.to_dict(),
+                }
+            notify(progress, stage="compile", target="reference")
+            reference = engine.compile(reference_ws, reference_code, timeout=compile_timeout(None))
+            if reference.status != "COMPILE_OK":
+                return {
+                    "status": f"REFERENCE_{reference.status}",
+                    "compile": reference.to_dict(),
+                }
+            budget = run_timeout(timeout)
+            for number, case in enumerate(test_cases, 1):
+                notify(progress, stage="case", test_number=number, total=len(test_cases))
+                cand = engine.run(candidate_ws, candidate, case, timeout=budget)
+                if cand.status != "OK":
+                    return {
+                        "status": "CANDIDATE_TLE" if cand.timed_out else "CANDIDATE_RUNTIME_ERROR",
+                        "test_number": number,
+                        "input": case,
+                        "candidate": cand.to_dict(),
+                    }
+                ref = engine.run(reference_ws, reference, case, timeout=budget)
+                if ref.status != "OK":
+                    return {
+                        "status": "REFERENCE_TLE" if ref.timed_out else "REFERENCE_RUNTIME_ERROR",
+                        "test_number": number,
+                        "input": case,
+                        "reference": ref.to_dict(),
+                    }
+                if normalize_output(cand.stdout) != normalize_output(ref.stdout):
+                    notify(progress, stage="mismatch", test_number=number)
+                    return {
+                        "status": "WRONG_ANSWER_FOUND",
+                        "test_number": number,
+                        "input": case,
+                        "candidate_output": cand.stdout,
+                        "reference_output": ref.stdout,
+                    }
+            return {
+                "status": "ALL_TESTS_PASSED",
+                "tests_run": len(test_cases),
+                "warning": "Finite tests do not prove correctness.",
+            }
+    except BackendUnavailable as exc:
+        return sandbox_unavailable(exc)
