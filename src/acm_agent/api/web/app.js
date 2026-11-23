@@ -253,7 +253,9 @@ fetchJSON("/status", {}, 10_000)
     statusDot.className = "online";
     statusText.textContent = "服务运行正常 · v" + data.version;
     document.querySelector("#environment-detail").textContent = data.executor === "docker" ? "Docker 隔离执行" : (data.compiler_available ? "本地 g++ · 已就绪" : "未找到 g++，请安装 C++ 编译器");
-    document.querySelector("#model-detail").textContent = data.model_configured ? `模型：${data.model}` : "离线工具模式 · 模型未配置";
+    document.querySelector("#model-detail").textContent = data.model_configured
+      ? `${data.provider === "deepseek" ? "DeepSeek" : "模型"} · ${data.model}`
+      : (data.provider === "deepseek" ? `DeepSeek · ${data.model_name} · 等待本地密钥` : "离线工具模式 · 模型未配置");
     if (!data.trusted_code_only) document.querySelector("#execution-note").textContent = "Docker 隔离执行 · 有限测试不能证明正确性";
   })
   .catch(() => {

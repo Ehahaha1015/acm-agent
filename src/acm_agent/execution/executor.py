@@ -27,6 +27,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from acm_agent.config import get_settings
 from acm_agent.textutil import sanitize_text
 
 MAX_OUTPUT = 16_384
@@ -230,7 +231,7 @@ def compile_program(
     executable = root / ("program.exe" if os.name == "nt" else "program")
     source.write_text(sanitize_text(code), encoding="utf-8")
     command = [
-        compiler or os.getenv("ACM_CXX", DEFAULT_COMPILER),
+        compiler or get_settings().cpp_compiler,
         str(source),
         *(flags if flags is not None else DEFAULT_FLAGS),
         "-o",

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from acm_agent.config import get_settings
+from acm_agent.privacy import redact_secrets
 from acm_agent.textutil import sanitize_text
 from acm_agent.tools import compare_cpp, judge_cpp, stress_cpp
 from acm_agent.tools.cpp_tools import check_cpp
@@ -98,11 +99,11 @@ class Coach:
         if not settings.llm_configured:
             return local_answer, verified_tool_result
 
-        from agents import OpenAIChatCompletionsModel, Runner, set_tracing_disabled
+        from agents import ModelSettings, OpenAIChatCompletionsModel, Runner, set_tracing_disabled
         from openai import AsyncOpenAI
 
         # Third-party OpenAI-compatible gateways usually cannot receive OpenAI tracing.
-        set_tracing_disabled(bool(settings.openai_base_url))
+        set_tracing_disabled(True)
         client = AsyncOpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url or None,
@@ -113,13 +114,20 @@ class Coach:
             model = OpenAIChatCompletionsModel(
                 model=settings.openai_model or "", openai_client=client
             )
-            agent = self.build_sdk_agent(model=model)
+            agent = self.build_sdk_agent(
+                model=model, strict_tools=not settings.is_deepseek,
+                model_settings=ModelSettings(
+                    max_tokens=4096,
+                    extra_body={"thinking": {"type": "disabled"}} if settings.is_deepseek else None,
+                ),
+            )
             prompt = _prompt_with_history(message, history or [], verified_tool_result)
             async with asyncio.timeout(60.0):
                 result = await Runner.run(agent, prompt, max_turns=8)
-        except Exception as exc:
-            logger.warning("model call failed: %s", exc)
-            raise ModelUnavailable(str(exc), local_answer, verified_tool_result) from exc
+        except Exception as exc:  # noqa: BLE001 - sanitize errors at the provider boundary
+            reason = redact_secrets(str(exc), settings.openai_api_key)
+            logger.warning("model call failed: %s", reason)
+            raise ModelUnavailable(reason, local_answer, verified_tool_result) from None
         finally:
             await client.close()
         answer = str(result.final_output or "").strip()
@@ -147,17 +155,22 @@ class Coach:
         }
 
     @staticmethod
-    def build_sdk_agent(model: object | None = None):
+    def build_sdk_agent(
+        model: object | None = None, *, strict_tools: bool = True, model_settings=None
+    ):
         """Construct an OpenAI Agents SDK agent when that optional dependency is installed."""
         try:
-            from agents import Agent, function_tool
+            from agents import Agent, ModelSettings, function_tool
         except ImportError as exc:
             raise RuntimeError("Install openai-agents to enable hosted LLM orchestration") from exc
         tools = [
-            function_tool(fn, name_override=name)
+            function_tool(fn, name_override=name, strict_mode=strict_tools)
             for name, fn in Coach.registered_tools().items()
         ]
-        return Agent(name="ACM Coach", instructions=INSTRUCTIONS, tools=tools, model=model)
+        return Agent(
+            name="ACM Coach", instructions=INSTRUCTIONS, tools=tools, model=model,
+            model_settings=model_settings or ModelSettings(),
+        )
 
 
 def _prompt_with_history(

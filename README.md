@@ -1,6 +1,46 @@
 # ACM Agent
 
-**讨论算法，用真实执行检验思路。** 支持 C++20 编译、运行、差分测试与随机对拍的算法竞赛教练，提供浏览器工作台和 CLI。离线工具无需 API 密钥；配置模型后可进行算法讲解和工具调用。
+**从一个思路，到一份可靠的代码。**
+
+DeepSeek 讲清算法与边界，真实 C++20 编译器给出执行证据。把题目、代码和疑问放进来，带着标准输出、编译诊断或可复现的反例继续改进。
+
+[![CI](https://github.com/Ehahaha1015/acm-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Ehahaha1015/acm-agent/actions/workflows/ci.yml)
+
+[快速启动](#快速启动) · [DeepSeek 配置](#连接-deepseek) · [密钥保护](#密钥只留在本机) · [API 与 Python 工具](#api-与-python-工具)
+
+![ACM Agent 浏览器工作台首页](docs/images/overview.png)
+
+## 一道负数题，走完一次排错
+
+“求数组最大值”很简单，直到所有数都是负数，而答案初值恰好写成了 `0`。
+
+### ① 把疑问交给教练，把运行交给工具
+
+直接问：“数组 `[-2, -5, -1]` 的最大值为什么不能从 `0` 开始算？”DeepSeek 会结合真实工具调用解释问题、复杂度和安全写法。下面是一次实际对话：正确版本得到 `-1`，错误初值的版本得到 `0`；展开的工具卡片保留了错误版本的真实输出。
+
+![DeepSeek 实际调用 C++ 工具并解释全负数数组的初始化错误](docs/images/deepseek-coach.png)
+
+### ② 写一份代码，立刻听见回声
+
+进入 **代码验证**，粘贴代码与输入，点击运行。编译是否成功、程序输出什么、耗时多少，都来自真实进程。这个例子输入 `3 / -2 -5 -1`，标准输出就是 `-1`。
+
+![C++20 示例真实编译运行，标准输出为 -1](docs/images/cpp-run.png)
+
+### ③ 让对拍替你撞见遗漏的边界
+
+放入 Candidate、Reference 和读取种子的 Generator。示例在种子 `1` 找到了全负数输入：Candidate 输出 `0`，Reference 输出 `-29`。完整输入、种子和双方输出一起留在结果中；修复后用同一个种子再跑，便能检验修改。
+
+![随机对拍真实发现反例，保留种子、完整输入与两份输出](docs/images/stress-counterexample.png)
+
+> 上图均为本项目的实际浏览器画面。截图只包含操作区，侧栏历史对话与本地配置不入图。**有限测试和随机对拍通过都不构成正确性证明。**
+
+| 能力 | 你会拿到什么 |
+| --- | --- |
+| DeepSeek 教练对话 | 算法思路、复杂度、边界分析，以及按需调用真实工具 |
+| 编译 / 运行 | 编译诊断、标准输出、退出码和超时结果 |
+| 差分 / 随机对拍 | 与参考程序比较，记录首个反例和可复现种子 |
+| 草稿 / 会话 / 导出 | 浏览器保存代码草稿，SQLite 恢复对话，JSON 带走执行证据 |
+| 离线工具模式 | 没有模型密钥也可使用完整代码验证工作台 |
 
 ## 快速启动
 
@@ -38,17 +78,61 @@ int main() { std::cout << "hello\n"; }
 
 工作台自动在当前浏览器保存代码草稿，执行结果可复制或下载。下载 JSON 包含本次源代码、输入、结果与工具事件，便于复现。**有限测试与随机对拍通过均不构成正确性证明。**
 
-## 连接模型
+## 连接 DeepSeek
 
-复制 `.env.example` 为 `.env`，填写自己的配置，重启服务：
+默认接入官方 `deepseek-flash`。模型名称与 API 地址按 [DeepSeek 官方接入文档](https://api-docs.deepseek.com/) 核对；可用模型会变化，以官方文档和你的账户权限为准。
 
-```dotenv
-OPENAI_API_KEY=你的密钥
-OPENAI_MODEL=供应商支持的模型名称
-OPENAI_BASE_URL=
+**Windows：用本地密码框录入，不把密钥写进命令行。**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\configure-deepseek.ps1
 ```
 
-使用兼容 OpenAI Chat Completions 的网关时填写其 `OPENAI_BASE_URL`，且网关必须支持工具调用。密钥只保存在本机 `.env`，不会下发浏览器。未配置模型时聊天会说明离线状态，代码工具仍可使用。模型暂不可用时，已经获得的本地执行证据仍会返回。
+在弹出的窗口中输入 API Key，点击 **Save locally**。窗口使用密码框，只把配置写入当前项目已被 Git 忽略的 `.env`，不打印密钥。随后启动或重启服务：
+
+```powershell
+uv run acm-agent --doctor
+uv run acm-agent --web
+```
+
+**其他系统：** 复制 `.env.example` 为 `.env`，用本地编辑器填写 `DEEPSEEK_API_KEY`。不要把真实密钥粘贴到 README、聊天记录或终端命令中。配置结构如下，示例中的密钥字段有意留空：
+
+```dotenv
+ACM_MODEL_PROVIDER=deepseek
+DEEPSEEK_API_KEY=
+DEEPSEEK_MODEL=deepseek-flash
+```
+
+程序使用 `https://api.deepseek.com` 的 Chat Completions 接口。为保持模型与 C++ 工具之间的调用兼容，默认显式关闭 thinking，使用非思考模式，并限制每次模型输出长度。需要更换模型时，可在本地修改 `DEEPSEEK_MODEL`；[官方模型列表](https://api-docs.deepseek.com/quick_start/pricing/) 与 [工具调用说明](https://api-docs.deepseek.com/guides/tool_calls/) 提供当前支持情况。
+
+验收时，侧栏应显示 **DeepSeek · deepseek-flash**。发送上面的负数数组问题，并要求真实运行；回答应附带可展开的工具结果。`--doctor` 的 `model_configured=true` 只说明配置完整，实际对话成功才说明连接可用。
+
+模型未配置时，代码验证照常工作。模型暂不可用但本地工具已经完成时，返回已有的真实执行证据。鉴权失败请检查密钥，余额不足请在 DeepSeek 控制台处理；不要把含密钥的配置文件上传排错。
+
+<details>
+<summary>连接其他 OpenAI 兼容服务</summary>
+
+在 `.env` 中改为 `ACM_MODEL_PROVIDER=openai`，填写 `OPENAI_API_KEY`、`OPENAI_MODEL` 与可选 `OPENAI_BASE_URL`。服务需要支持 Chat Completions 工具调用。
+
+</details>
+
+## 密钥只留在本机
+
+- `.env`、`.env.*`、`secrets/` 和 `*.key` 被 Git 忽略；仓库仅保留空密钥的 `.env.example`。
+- Docker 构建同样排除本地配置。`.env` 被直接读入配置对象，不写入 C++ 子进程继承的环境变量。
+- `/status` 和 `--doctor` 只展示模型名与配置状态。模型异常回传前脱敏，SDK tracing 关闭。
+- 本地提交钩子会检查暂存区，拦截被强行加入的 `.env`、本机实际密钥、常见 API Key 与私钥文本。检查失败只报告文件路径，不显示密钥。
+
+首次克隆后，可启用提交与推送前检查：
+
+```bash
+git config core.hooksPath .githooks
+uv run python scripts/check_secrets.py --all
+```
+
+GitHub CI 也会扫描跟踪文件。提交前检查不能替代人工核对：不要使用 `git add -f .env`，也不要绕过检查钩子。截图和日志分享前同样检查内容。
+
+## CLI 与持久会话
 
 CLI 支持多行粘贴与持久会话：
 
@@ -129,11 +213,16 @@ stress_cpp(candidate_code, reference_code, generator_code,
 uv sync --frozen
 uv run ruff check .
 uv run pytest -q
+uv run python scripts/check_secrets.py --all
 node --check src/acm_agent/api/web/app.js
 node --check src/acm_agent/api/web/lab.js
 ```
 
-测试不需要密钥，使用隔离 SQLite 数据库。覆盖真实 C++ 编译运行、超时、差分反例、种子复现、API 校验、会话迁移恢复、输出上限、模型工具后端选择，以及单节点 Docker 调度与执行路径。Docker 调度采用可控 transport 测试；真实容器运行还依赖本机 Docker 守护进程和镜像。CI 在 Python 3.12 / 3.13 上执行 Ruff 与 pytest。
+自动化测试不需要密钥，使用隔离 SQLite 数据库，并显式屏蔽本机模型配置，避免测试产生真实 API 费用。覆盖真实 C++ 编译运行、超时、差分反例、种子复现、API 校验、会话迁移恢复、输出上限、DeepSeek 参数兼容、错误脱敏和提交前密钥拦截。Docker 调度采用可控 transport 测试；真实容器运行还依赖本机 Docker 守护进程和镜像。CI 在 Python 3.12 / 3.13 上执行密钥检查、Ruff 与 pytest。
+
+### 本次实测记录
+
+2026-11-23：Windows 本机已实际连接 DeepSeek，完成“生成 C++ → 工具执行 → 解释负数初始化错误”的完整调用。工作台运行示例输出 `-1`；随机对拍种子 `1` 找到 Candidate `0` / Reference `-29` 的反例。文中截图来自这些实际操作，密钥与个人历史记录未入图。
 
 ```mermaid
 flowchart LR
