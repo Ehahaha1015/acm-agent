@@ -187,7 +187,8 @@ class DockerBackend:
             "--cap-drop=ALL",
             "--security-opt=no-new-privileges",
             "--tmpfs",
-            "/tmp:rw,nosuid,size=64m",
+            # Compiled C/C++ programs live here; Docker's tmpfs defaults to noexec.
+            "/tmp:rw,exec,nosuid,nodev,size=64m",
         ]
         options += ["--network=none"] if not self.network else []
         return options
