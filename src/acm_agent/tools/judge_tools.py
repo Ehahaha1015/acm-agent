@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from acm_agent.execution.backend import BackendUnavailable
 from acm_agent.tools._support import (
     Progress,
@@ -49,11 +51,16 @@ def compare_cpp(
     test_cases: list[str],
     timeout: float | None = None,
     progress: Progress | None = None,
+    budget_seconds: float | None = None,
 ) -> dict:
     """Differential-test candidate against reference on explicit cases."""
+    if not test_cases:
+        return {"status": "INVALID_TEST_CASES", "message": "Provide at least one test case."}
+    deadline = time.monotonic() + budget_seconds if budget_seconds is not None else None
     try:
         engine = backend()
-        with engine.workspace() as candidate_ws, engine.workspace() as reference_ws:
+        with engine.workspaces(2) as workspaces:
+            candidate_ws, reference_ws = workspaces
             notify(progress, stage="compile", target="candidate")
             candidate = engine.compile(candidate_ws, candidate_code, timeout=compile_timeout(None))
             if candidate.status != "COMPILE_OK":
@@ -70,6 +77,12 @@ def compare_cpp(
                 }
             budget = run_timeout(timeout)
             for number, case in enumerate(test_cases, 1):
+                if deadline is not None and time.monotonic() >= deadline:
+                    return {
+                        "status": "COMPARE_TIME_LIMIT", "tests_completed": number - 1,
+                        "tests_requested": len(test_cases),
+                        "warning": "The comparison budget expired; the test suite did not pass.",
+                    }
                 notify(progress, stage="case", test_number=number, total=len(test_cases))
                 cand = engine.run(candidate_ws, candidate, case, timeout=budget)
                 if cand.status != "OK":

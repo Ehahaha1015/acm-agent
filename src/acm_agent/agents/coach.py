@@ -11,7 +11,8 @@ from typing import Any
 
 from acm_agent.config import get_settings
 from acm_agent.textutil import sanitize_text
-from acm_agent.tools import compare_cpp, compile_cpp, judge_cpp, stress_cpp
+from acm_agent.tools import compare_cpp, judge_cpp, stress_cpp
+from acm_agent.tools.cpp_tools import check_cpp
 from acm_agent.tools.sdk_tools import (
     compare_cpp_tool,
     compile_cpp_tool,
@@ -23,6 +24,7 @@ from acm_agent.tools.sdk_tools import (
 logger = logging.getLogger(__name__)
 
 INSTRUCTIONS = """You are ACM Coach. Explain algorithms, complexity, edge cases and C++20.
+Reply in the user's language. Separate reasoning from observed execution evidence.
 Use tools whenever execution is requested or source and input are supplied. Never claim a
 program compiled, ran, timed out, or had a counterexample unless a tool returned that fact.
 Passing finite or random tests is evidence, not a proof of correctness."""
@@ -48,20 +50,23 @@ class CoachEngine:
 
     def answer(self, message: str) -> tuple[str, dict | None]:
         candidate, reference, generator = _extract_blocks(message)
+        input_data = _extract_input(message)
         tool_result = None
         if candidate and reference and generator:
-            tool_result = stress_cpp(candidate, reference, generator)
+            tool_result = stress_cpp(candidate, reference, generator, budget_seconds=30.0)
         elif candidate and reference:
             cases = _extract_cases(message)
-            tool_result = compare_cpp(candidate, reference, cases) if cases else None
-        elif candidate and _extract_input(message):
-            tool_result = judge_cpp(candidate, _extract_input(message))
+            tool_result = compare_cpp(candidate, reference, cases, budget_seconds=30.0) if cases else None
+        elif candidate and input_data is not None:
+            tool_result = judge_cpp(candidate, input_data)
         elif candidate and any(word in message.lower() for word in ("compile", "编译")):
-            tool_result = compile_cpp(candidate)
+            tool_result = check_cpp(candidate)
         if tool_result:
             return _format_tool_result(tool_result), tool_result
-        return ("I can analyze the algorithm, complexity, invariants, edge cases, and C++20 code. "
-                "Provide source plus input/reference when you want real execution."), None
+        return (
+            "当前为离线工具模式，算法讲解需要配置模型。你仍可在「代码验证」中直接编译、"
+            "运行、差分测试和随机对拍。也可以发送 C++ 代码块与输入代码块来实际运行。"
+        ), None
 
 
 class Coach:
@@ -101,16 +106,17 @@ class Coach:
         client = AsyncOpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url or None,
-            timeout=60.0,
+            timeout=45.0,
+            max_retries=0,
         )
-        model = OpenAIChatCompletionsModel(
-            model=settings.openai_model or "",
-            openai_client=client,
-        )
-        agent = self.build_sdk_agent(model=model)
-        prompt = _prompt_with_history(message, history or [], verified_tool_result)
         try:
-            result = await Runner.run(agent, prompt, max_turns=8)
+            model = OpenAIChatCompletionsModel(
+                model=settings.openai_model or "", openai_client=client
+            )
+            agent = self.build_sdk_agent(model=model)
+            prompt = _prompt_with_history(message, history or [], verified_tool_result)
+            async with asyncio.timeout(60.0):
+                result = await Runner.run(agent, prompt, max_turns=8)
         except Exception as exc:
             logger.warning("model call failed: %s", exc)
             raise ModelUnavailable(str(exc), local_answer, verified_tool_result) from exc
@@ -123,7 +129,7 @@ class Coach:
         # router so an explicit compile/judge request still executes the real tool.
         if not answer and tool_result is None:
             return local_answer, verified_tool_result
-        return answer, tool_result
+        return answer or _format_tool_result(tool_result), tool_result
 
     @staticmethod
     def registered_tools() -> dict[str, object]:
@@ -203,17 +209,27 @@ def _extract_blocks(message: str) -> tuple[str | None, str | None, str | None]:
 
 
 def _extract_input(message: str) -> str | None:
-    match = re.search(r"(?:input|输入)\s*[:：]\s*```?\s*([^`]+?)\s*```?(?:\n|$)", message, re.IGNORECASE | re.DOTALL)
-    return match.group(1).strip() if match else None
+    match = re.search(
+        r"(?:input|输入)\s*[:：]?\s*```[^\n`]*\n(.*?)```",
+        message, re.IGNORECASE | re.DOTALL,
+    )
+    return match.group(1) if match else None
 
 
 def _extract_cases(message: str) -> list[str]:
     text = _extract_input(message)
-    return [text] if text else []
+    return [text] if text is not None else []
 
 
 def _format_tool_result(result: dict) -> str:
     status = result.get("status", "UNKNOWN")
     if status == "WRONG_ANSWER_FOUND":
         return f"{status}: seed/test {result.get('seed', result.get('test_number'))}\nInput:\n{result.get('input')}\nCandidate:\n{result.get('candidate_output')}\nReference:\n{result.get('reference_output')}"
-    return f"Tool result: {status}. {result.get('warning', '')}".strip()
+    parts = [f"Tool result: {status}."]
+    if result.get("stdout"):
+        parts.append(f"标准输出：\n```text\n{result['stdout']}\n```")
+    if result.get("stderr"):
+        parts.append(f"诊断信息：\n```text\n{result['stderr']}\n```")
+    if result.get("warning"):
+        parts.append(result["warning"])
+    return "\n\n".join(parts)

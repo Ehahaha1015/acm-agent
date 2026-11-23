@@ -25,6 +25,7 @@ def _bool(name: str, default: bool = False) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class Settings:
+    database: str = "workspace/acm_agent.sqlite3"
     openai_api_key: str | None = None
     openai_base_url: str | None = None
     openai_model: str | None = None
@@ -52,17 +53,18 @@ def get_settings() -> Settings:
     load_dotenv()
     limit = _int("ACM_MEMORY_LIMIT_MB", 0)
     return Settings(
+        database=os.getenv("ACM_DATABASE") or "workspace/acm_agent.sqlite3",
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         openai_base_url=os.getenv("OPENAI_BASE_URL"),
         openai_model=os.getenv("OPENAI_MODEL"),
         executor=(os.getenv("ACM_EXECUTOR") or "local").strip().lower(),
         docker_image=os.getenv("ACM_DOCKER_IMAGE") or "gcc:14",
-        docker_workers=_int("ACM_DOCKER_WORKERS", 2),
+        docker_workers=max(1, _int("ACM_DOCKER_WORKERS", 2)),
         docker_memory=os.getenv("ACM_DOCKER_MEMORY") or "256m",
         docker_cpus=os.getenv("ACM_DOCKER_CPUS") or "1.0",
         docker_network=_bool("ACM_DOCKER_NETWORK", False),
-        memory_limit_mb=limit or None,
-        run_timeout=float(_int("ACM_RUN_TIMEOUT_MS", 2000)) / 1000.0,
-        compile_timeout=float(_int("ACM_COMPILE_TIMEOUT_MS", 10_000)) / 1000.0,
-        stress_timeout=float(_int("ACM_STRESS_TIMEOUT_MS", 2000)) / 1000.0,
+        memory_limit_mb=limit if limit > 0 else None,
+        run_timeout=max(1, _int("ACM_RUN_TIMEOUT_MS", 2000)) / 1000.0,
+        compile_timeout=max(1, _int("ACM_COMPILE_TIMEOUT_MS", 10_000)) / 1000.0,
+        stress_timeout=max(1, _int("ACM_STRESS_TIMEOUT_MS", 2000)) / 1000.0,
     )

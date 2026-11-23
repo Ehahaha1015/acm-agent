@@ -47,7 +47,8 @@ def stress_cpp(
             "reference": reference_code,
             "generator": generator_code,
         }
-        with engine.workspace() as candidate_ws, engine.workspace() as reference_ws, engine.workspace() as generator_ws:
+        with engine.workspaces(3) as leased:
+            candidate_ws, reference_ws, generator_ws = leased
             workspaces = {
                 "candidate": candidate_ws,
                 "reference": reference_ws,

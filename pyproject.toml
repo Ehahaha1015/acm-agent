@@ -1,6 +1,6 @@
 [project]
 name = "acm-agent"
-version = "0.1.0"
+version = "0.2.0"
 description = "ACM Agent - an AI competitive programming coach with real C++ execution"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -15,16 +15,15 @@ dependencies = [
 acm-agent = "acm_agent.main:main"
 
 [dependency-groups]
-dev = ["pytest>=8.0", "ruff>=0.6"]
+dev = ["pytest>=8.0", "ruff>=0.6", "httpx>=0.27"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "acm_agent_tests"]
+testpaths = ["acm_agent_tests"]
 pythonpath = ["src"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-exclude = ["compiler", "app.py", "tests"]
 
 [build-system]
 requires = ["hatchling"]

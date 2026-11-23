@@ -17,23 +17,23 @@ Backends are process-wide singletons created by :func:`get_backend`, which reads
 from __future__ import annotations
 
 import shutil
-import subprocess
 import tempfile
 import threading
 import uuid
 from collections.abc import Callable, Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from acm_agent.execution.executor import (
     DEFAULT_FLAGS,
-    TEXT_KWARGS,
+    OUTPUT_LIMIT_EXIT_CODE,
     CompileResult,
     ExecutionResult,
-    _kill_process_tree,
     compile_program,
+    run_command,
     run_program,
+    truncate_output,
 )
 
 DOCKER_TIMEOUT_EXIT_CODES = frozenset({124, 137, 143})
@@ -53,6 +53,9 @@ class ExecutionBackend(Protocol):
     name: str
 
     def workspace(self) -> Any:  # context manager yielding a workspace handle
+        ...
+
+    def workspaces(self, count: int) -> Any:
         ...
 
     def compile(self, workspace: str, code: str, *, timeout: float = 10.0) -> CompileResult:
@@ -98,6 +101,11 @@ class LocalBackend:
     def compile(self, workspace: str, code: str, *, timeout: float = 10.0) -> CompileResult:
         return compile_program(code, timeout=timeout, workdir=workspace)
 
+    @contextmanager
+    def workspaces(self, count: int) -> Iterator[list[str]]:
+        with ExitStack() as stack:
+            yield [stack.enter_context(self.workspace()) for _ in range(count)]
+
     def run(
         self,
         workspace: str,
@@ -131,22 +139,12 @@ def _docker_runner(
 ) -> tuple[int | None, str, str, bool]:
     """Default transport: run the ``docker`` CLI and capture its output."""
     try:
-        proc = subprocess.Popen(
-            list(argv),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            **TEXT_KWARGS,
+        stdout, stderr, code, timed_out, _ = run_command(
+            argv, input_text=input_text, timeout=timeout
         )
     except FileNotFoundError as exc:
         raise BackendUnavailable("the docker CLI was not found on PATH") from exc
-    try:
-        stdout, stderr = proc.communicate(input=input_text, timeout=timeout)
-        return proc.returncode, stdout or "", stderr or "", False
-    except subprocess.TimeoutExpired:
-        _kill_process_tree(proc)
-        stdout, stderr = proc.communicate()
-        return None, stdout or "", stderr or "", True
+    return code, stdout, stderr, timed_out
 
 
 @dataclass
@@ -241,13 +239,15 @@ class DockerBackend:
     def _release(self, container: str) -> None:
         slots = self._slots
         assert slots is not None
-        if self._is_running(container):
-            with self._lock:
-                self._idle.append(container)
-        else:
-            with self._lock:
-                self._known.discard(container)
-        slots.release()
+        try:
+            if self._is_running(container):
+                with self._lock:
+                    self._idle.append(container)
+            else:
+                with self._lock:
+                    self._known.discard(container)
+        finally:
+            slots.release()
 
     def warmup(self) -> int:
         """Pre-start the pool so the first submission does not pay container startup."""
@@ -269,13 +269,22 @@ class DockerBackend:
 
     @contextmanager
     def workspace(self) -> Iterator[str]:
+        with self.workspaces(1) as workspaces:
+            yield workspaces[0]
+
+    @contextmanager
+    def workspaces(self, count: int) -> Iterator[list[str]]:
+        # One operation leases one worker, regardless of how many programs it uses.
+        # Nested worker leases deadlock when compare/stress need more than pool size.
         container = self._acquire()
         directory = f"{CONTAINER_WORKROOT}/{uuid.uuid4().hex[:12]}"
         try:
-            yield f"docker://{container}{directory}"
+            yield [f"docker://{container}{directory}/{i}" for i in range(count)]
         finally:
-            self._cli(["exec", container, "sh", "-c", f"rm -rf {directory}"], timeout=60.0)
-            self._release(container)
+            try:
+                self._cli(["exec", container, "sh", "-c", f"rm -rf {directory}"], timeout=60.0)
+            finally:
+                self._release(container)
 
     @staticmethod
     def _split(workspace: str) -> tuple[str, str]:
@@ -300,11 +309,11 @@ class DockerBackend:
 
     def compile(self, workspace: str, code: str, *, timeout: float = 10.0) -> CompileResult:
         container, directory = self._split(workspace)
-        budget = max(timeout, self.compile_timeout)
+        budget = max(0.01, timeout)
         flags = " ".join(DEFAULT_FLAGS)
         prepare = (
             f"mkdir -p {directory} && cat > {directory}/source.cpp && "
-            f"timeout -s KILL {budget:.0f}s g++ {directory}/source.cpp {flags} "
+            f"timeout -s KILL {budget:.2f}s g++ {directory}/source.cpp {flags} "
             f"-o {directory}/program"
         )
         exit_code, stdout, stderr, timed_out = self._exec(
@@ -322,8 +331,8 @@ class DockerBackend:
         return CompileResult(
             status="COMPILE_OK" if ok else "COMPILE_ERROR",
             executable=executable if ok else None,
-            stdout=stdout,
-            stderr=stderr,
+            stdout=truncate_output(stdout),
+            stderr=truncate_output(stderr),
             exit_code=exit_code,
             command=["docker", "exec", container, "g++", f"{directory}/source.cpp", *DEFAULT_FLAGS],
         )
@@ -338,9 +347,8 @@ class DockerBackend:
     ) -> ExecutionResult:
         if not compiled.executable:
             return ExecutionResult("RUNTIME_ERROR", stderr="no executable was produced")
-        container, rest = self._split(compiled.executable)
-        program = "/" + rest.split("/", 1)[1]
-        budget = max(1.0, timeout)
+        container, program = self._split(compiled.executable)
+        budget = max(0.01, timeout)
         exit_code, stdout, stderr, client_timeout = self._exec(
             container,
             f"timeout -s KILL {budget:.2f}s {program}",
@@ -356,6 +364,8 @@ class DockerBackend:
                 timed_out=True,
             )
         status = "OK" if exit_code == 0 else "RUNTIME_ERROR"
+        if exit_code == OUTPUT_LIMIT_EXIT_CODE:
+            status = "OUTPUT_LIMIT_EXCEEDED"
         return ExecutionResult(status, stdout=stdout, stderr=stderr, exit_code=exit_code)
 
     def close(self) -> None:
@@ -387,6 +397,8 @@ def build_backend() -> ExecutionBackend:
             cpus=settings.docker_cpus,
             network=settings.docker_network,
         )
+    if settings.executor != "local":
+        raise BackendUnavailable(f"Unknown ACM_EXECUTOR: {settings.executor}")
     return LocalBackend(memory_limit_mb=settings.memory_limit_mb)
 
 

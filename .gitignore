@@ -8,3 +8,6 @@ workspace/
 .acm-agent-work/
 output/
 dist/
+.playwright-cli/
+*.egg-info/
+build/

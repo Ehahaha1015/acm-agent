@@ -20,13 +20,18 @@ import os
 import signal
 import subprocess
 import tempfile
+import threading
 import time
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from acm_agent.textutil import sanitize_text
+
 MAX_OUTPUT = 16_384
+MAX_CAPTURE = 1_048_576
+OUTPUT_LIMIT_EXIT_CODE = -1000
 DEFAULT_COMPILER = os.getenv("ACM_CXX", "g++")
 DEFAULT_FLAGS: tuple[str, ...] = ("-std=c++20", "-O2", "-pipe", "-Wall", "-Wextra")
 KILL_GRACE_SECONDS = 5.0
@@ -96,9 +101,9 @@ def _popen(
 
 
 def _kill_process_tree(proc: subprocess.Popen) -> None:
-    if proc.poll() is not None:
-        return
     if os.name == "nt":
+        if proc.poll() is not None:
+            return
         subprocess.run(
             ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
             capture_output=True,
@@ -107,7 +112,7 @@ def _kill_process_tree(proc: subprocess.Popen) -> None:
         )
     else:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            os.killpg(proc.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError, OSError):
             proc.kill()
     try:
@@ -134,13 +139,57 @@ def _memory_limiter(memory_limit_mb: int | None):
 def _communicate(
     proc: subprocess.Popen, input_text: str, timeout: float
 ) -> tuple[str, str, int | None, bool]:
-    try:
-        stdout, stderr = proc.communicate(input=input_text, timeout=timeout)
-        return stdout or "", stderr or "", proc.returncode, False
-    except subprocess.TimeoutExpired:
-        _kill_process_tree(proc)
-        stdout, stderr = proc.communicate()
-        return stdout or "", stderr or "", None, True
+    # Drain both pipes continuously, but retain at most MAX_CAPTURE characters each.
+    # communicate() buffers unlimited output before a timeout can stop a noisy program.
+    exceeded = threading.Event()
+    output: list[list[str]] = [[], []]
+
+    def drain(stream, target: list[str]) -> None:
+        size = 0
+        try:
+            while chunk := stream.read(4096):
+                remaining = max(0, MAX_CAPTURE - size)
+                target.append(chunk[:remaining])
+                size += len(chunk)
+                if size > MAX_CAPTURE:
+                    exceeded.set()
+                    break
+        finally:
+            stream.close()
+
+    def feed() -> None:
+        try:
+            proc.stdin.write(input_text)
+            proc.stdin.flush()
+        except (BrokenPipeError, OSError):
+            pass
+        finally:
+            proc.stdin.close()
+
+    readers = [
+        threading.Thread(target=drain, args=(stream, target), daemon=True)
+        for stream, target in zip((proc.stdout, proc.stderr), output)
+    ]
+    for thread in readers:
+        thread.start()
+    writer = threading.Thread(target=feed, daemon=True)
+    writer.start()
+    deadline = time.monotonic() + timeout
+    timed_out = False
+    while proc.poll() is None or any(thread.is_alive() for thread in readers):
+        if exceeded.is_set():
+            _kill_process_tree(proc)
+            break
+        if time.monotonic() >= deadline:
+            timed_out = True
+            _kill_process_tree(proc)
+            break
+        exceeded.wait(min(0.02, max(0, deadline - time.monotonic())))
+    for thread in readers:
+        thread.join(timeout=0.5)
+    writer.join(timeout=0.5)
+    code = OUTPUT_LIMIT_EXIT_CODE if exceeded.is_set() else proc.poll()
+    return "".join(output[0]), "".join(output[1]), code, timed_out
 
 
 def run_command(
@@ -179,9 +228,9 @@ def compile_program(
     root.mkdir(parents=True, exist_ok=True)
     source = root / "source.cpp"
     executable = root / ("program.exe" if os.name == "nt" else "program")
-    source.write_text(code, encoding="utf-8")
+    source.write_text(sanitize_text(code), encoding="utf-8")
     command = [
-        compiler or DEFAULT_COMPILER,
+        compiler or os.getenv("ACM_CXX", DEFAULT_COMPILER),
         str(source),
         *(flags if flags is not None else DEFAULT_FLAGS),
         "-o",
@@ -200,8 +249,8 @@ def compile_program(
     if timed_out:
         return CompileResult(
             "COMPILE_TIMEOUT",
-            stdout=stdout,
-            stderr=stderr,
+            stdout=truncate_output(stdout),
+            stderr=truncate_output(stderr),
             command=command,
             duration_ms=elapsed_ms,
         )
@@ -209,8 +258,8 @@ def compile_program(
     return CompileResult(
         status="COMPILE_OK" if ok else "COMPILE_ERROR",
         executable=str(executable) if ok else None,
-        stdout=stdout,
-        stderr=stderr,
+        stdout=truncate_output(stdout),
+        stderr=truncate_output(stderr),
         exit_code=exit_code,
         command=command,
         duration_ms=elapsed_ms,
@@ -248,6 +297,8 @@ def run_program(
             duration_ms=elapsed_ms,
         )
     status = "OK" if exit_code == 0 else "RUNTIME_ERROR"
+    if exit_code == OUTPUT_LIMIT_EXIT_CODE:
+        status = "OUTPUT_LIMIT_EXCEEDED"
     return ExecutionResult(
         status,
         stdout=stdout,
