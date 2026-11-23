@@ -1,31 +1,34 @@
-"""Docker execution abstraction. Local subprocess remains explicitly trusted-only."""
+"""Compatibility adapter using the shared, bounded multi-language Docker backend."""
 
 from __future__ import annotations
 
 import subprocess
-import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+
+from acm_agent.config import get_settings
+from acm_agent.execution.backend import DockerBackend
 
 
 @dataclass(slots=True)
 class DockerExecutor:
-    image: str = "gcc:14"
-    memory: str = "256m"
+    image: str = "acm-agent-runtime:latest"
+    memory: str = "512m"
     cpus: str = "1.0"
     timeout: float = 2.0
 
-    def run(self, source: str, input_data: str = "") -> subprocess.CompletedProcess[str]:
-        # Mount only two temporary files; the container has no network and no write access
-        # outside its ephemeral /tmp. This keeps source and test input out of the command line.
-        with tempfile.TemporaryDirectory(prefix="acm-docker-") as directory:
-            root = Path(directory)
-            (root / "main.cpp").write_text(source, encoding="utf-8")
-            (root / "input.txt").write_text(input_data, encoding="utf-8")
-            command = [
-                "docker", "run", "--rm", "--network=none", "--read-only", "--pids-limit=64",
-                f"--memory={self.memory}", f"--cpus={self.cpus}", "--cap-drop=ALL",
-                "--security-opt=no-new-privileges", "--tmpfs", "/tmp:rw,nosuid,size=64m", "-v", f"{root}:/work:ro", "-i", self.image,
-                "sh", "-c", "g++ /work/main.cpp -std=c++20 -O2 -o /tmp/main && /tmp/main < /work/input.txt",
-            ]
-            return subprocess.run(command, text=True, capture_output=True, timeout=self.timeout, check=False)
+    def run(self, source: str, input_data: str = "", language: str = "cpp") -> subprocess.CompletedProcess[str]:
+        engine = DockerBackend(image=self.image, workers=1, memory=self.memory, cpus=self.cpus)
+        try:
+            with engine.workspace() as workspace:
+                compiled = engine.compile(workspace, source, timeout=get_settings().compile_timeout,
+                                          language=language)
+                if compiled.status != "COMPILE_OK":
+                    return subprocess.CompletedProcess(compiled.command or [],
+                                                       compiled.exit_code or 1,
+                                                       compiled.stdout, compiled.stderr)
+                ran = engine.run(workspace, compiled, input_data, timeout=self.timeout)
+                return subprocess.CompletedProcess(compiled.run_command or [],
+                                                   ran.exit_code if ran.exit_code is not None else 124,
+                                                   ran.stdout, ran.stderr)
+        finally:
+            engine.close()

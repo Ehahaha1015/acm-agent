@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,9 +37,13 @@ class Settings:
     openai_model: str | None = None
     executor: str = "local"
     cpp_compiler: str = "g++"
-    docker_image: str = "gcc:14"
+    c_compiler: str = "gcc"
+    python_executable: str = sys.executable
+    javac_executable: str = "javac"
+    java_executable: str = "java"
+    docker_image: str = "acm-agent-runtime:latest"
     docker_workers: int = 2
-    docker_memory: str = "256m"
+    docker_memory: str = "512m"
     docker_cpus: str = "1.0"
     docker_network: bool = False
     memory_limit_mb: int | None = None
@@ -77,9 +82,13 @@ def get_settings() -> Settings:
         openai_model=(env.get("DEEPSEEK_MODEL") or "deepseek-flash") if deepseek else env.get("OPENAI_MODEL"),
         executor=(env.get("ACM_EXECUTOR") or "local").strip().lower(),
         cpp_compiler=env.get("ACM_CXX") or "g++",
-        docker_image=env.get("ACM_DOCKER_IMAGE") or "gcc:14",
+        c_compiler=env.get("ACM_CC") or "gcc",
+        python_executable=env.get("ACM_PYTHON") or sys.executable,
+        javac_executable=env.get("ACM_JAVAC") or "javac",
+        java_executable=env.get("ACM_JAVA") or "java",
+        docker_image=env.get("ACM_DOCKER_IMAGE") or "acm-agent-runtime:latest",
         docker_workers=max(1, _int(env, "ACM_DOCKER_WORKERS", 2)),
-        docker_memory=env.get("ACM_DOCKER_MEMORY") or "256m",
+        docker_memory=env.get("ACM_DOCKER_MEMORY") or "512m",
         docker_cpus=env.get("ACM_DOCKER_CPUS") or "1.0",
         docker_network=_bool(env, "ACM_DOCKER_NETWORK", False),
         memory_limit_mb=limit if limit > 0 else None,

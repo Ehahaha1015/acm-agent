@@ -10,21 +10,28 @@ from dataclasses import dataclass
 from typing import Any
 
 from acm_agent.config import get_settings
+from acm_agent.execution.languages import normalize_language
 from acm_agent.privacy import redact_secrets
 from acm_agent.textutil import sanitize_text
-from acm_agent.tools import compare_cpp, judge_cpp, stress_cpp
-from acm_agent.tools.cpp_tools import check_cpp
+from acm_agent.tools import check_code, compare_code, run_code, stress_code
 from acm_agent.tools.sdk_tools import (
+    compare_code_tool,
     compare_cpp_tool,
+    compile_code_tool,
     compile_cpp_tool,
     judge_cpp_tool,
+    run_code_tool,
     run_cpp_tool,
+    stress_code_tool,
     stress_cpp_tool,
 )
 
 logger = logging.getLogger(__name__)
 
-INSTRUCTIONS = """You are ACM Coach. Explain algorithms, complexity, edge cases and C++20.
+INSTRUCTIONS = """You are ACM Coach. Explain algorithms, complexity and edge cases in
+C++20, C17, Python3 and Java17. Use compile_code/run_code/compare_code/stress_code and
+set the language explicitly. Candidate, reference and generator may use different languages.
+Java submissions must use class Main without a package; Python runs with the standard library.
 Reply in the user's language. Separate reasoning from observed execution evidence.
 Use tools whenever execution is requested or source and input are supplied. Never claim a
 program compiled, ran, timed out, or had a counterexample unless a tool returned that fact.
@@ -50,23 +57,31 @@ class CoachEngine:
     """Deterministic local engine; no API key is required for tests and offline use."""
 
     def answer(self, message: str) -> tuple[str, dict | None]:
-        candidate, reference, generator = _extract_blocks(message)
+        programs = _extract_programs(message)
+        candidate = programs[0] if programs else None
+        reference = programs[1] if len(programs) > 1 else None
+        generator = programs[2] if len(programs) > 2 else None
         input_data = _extract_input(message)
         tool_result = None
         if candidate and reference and generator:
-            tool_result = stress_cpp(candidate, reference, generator, budget_seconds=30.0)
+            tool_result = stress_code(candidate[0], reference[0], generator[0],
+                                      language=candidate[1], reference_language=reference[1],
+                                      generator_language=generator[1], budget_seconds=30.0)
         elif candidate and reference:
             cases = _extract_cases(message)
-            tool_result = compare_cpp(candidate, reference, cases, budget_seconds=30.0) if cases else None
+            tool_result = compare_code(candidate[0], reference[0], cases, language=candidate[1],
+                                       reference_language=reference[1], budget_seconds=30.0) if cases else None
         elif candidate and input_data is not None:
-            tool_result = judge_cpp(candidate, input_data)
+            tool_result = run_code(candidate[0], input_data, language=candidate[1])
         elif candidate and any(word in message.lower() for word in ("compile", "编译")):
-            tool_result = check_cpp(candidate)
+            tool_result = check_code(candidate[0], language=candidate[1])
+        elif candidate and any(word in message.lower() for word in ("运行", "run", "execute")):
+            tool_result = run_code(candidate[0], "", language=candidate[1])
         if tool_result:
             return _format_tool_result(tool_result), tool_result
         return (
             "当前为离线工具模式，算法讲解需要配置模型。你仍可在「代码验证」中直接编译、"
-            "运行、差分测试和随机对拍。也可以发送 C++ 代码块与输入代码块来实际运行。"
+            "运行、差分测试和随机对拍。支持 C++、C、Python、Java 的带语言标记代码块。"
         ), None
 
 
@@ -147,6 +162,8 @@ class Coach:
         from :mod:`acm_agent.tools.sdk_tools`, not the internal tools with observers.
         """
         return {
+            "compile_code": compile_code_tool, "run_code": run_code_tool,
+            "compare_code": compare_code_tool, "stress_code": stress_code_tool,
             "compile_cpp": compile_cpp_tool,
             "run_cpp": run_cpp_tool,
             "judge_cpp": judge_cpp_tool,
@@ -184,7 +201,7 @@ def _prompt_with_history(
     parts.append(f"Current user message:\n{message}")
     if verified_tool_result:
         parts.append(
-            "A local C++ tool has already executed. Treat this JSON as the verified result, "
+            "A local program tool has already executed. Treat this JSON as the verified result, "
             "explain it clearly, and never contradict or invent execution facts:\n"
             + json.dumps(verified_tool_result, ensure_ascii=False)
         )
@@ -209,16 +226,22 @@ def _extract_sdk_tool_result(items: list[Any]) -> dict | None:
 
 
 def _extract_blocks(message: str) -> tuple[str | None, str | None, str | None]:
-    code_blocks: list[str] = []
+    blocks = [code for code, language in _extract_programs(message)]
+    return tuple((blocks + [None, None, None])[:3])
+
+
+def _extract_programs(message: str) -> list[tuple[str, str]]:
+    programs = []
     for match in re.finditer(r"```([^\n`]*)\n?(.*?)```", message, re.DOTALL):
         language, body = match.group(1).strip().lower(), match.group(2)
-        looks_like_cpp = language in {"cpp", "c++", "cc", "cxx"} or "#include" in body or "int main" in body
-        if looks_like_cpp:
-            code_blocks.append(body)
-    candidate = code_blocks[0] if code_blocks else None
-    reference = code_blocks[1] if len(code_blocks) > 1 else None
-    generator = code_blocks[2] if len(code_blocks) > 2 else None
-    return candidate, reference, generator
+        try:
+            detected = normalize_language(language)
+        except ValueError:
+            if language or not ("#include" in body or "int main" in body):
+                continue
+            detected = "cpp"
+        programs.append((body, detected))
+    return programs
 
 
 def _extract_input(message: str) -> str | None:

@@ -7,13 +7,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
+from acm_agent import __version__
 from acm_agent.agents.coach import Coach, ModelUnavailable
 from acm_agent.config import get_settings
 from acm_agent.diagnostics import runtime_status
 from acm_agent.execution.backend import reset_backend
+from acm_agent.execution.languages import Language
 from acm_agent.memory.session import SessionStore
-from acm_agent.tools import compare_cpp, judge_cpp, stress_cpp
-from acm_agent.tools.cpp_tools import check_cpp
+from acm_agent.tools import check_code, compare_code, run_code, stress_code
 
 try:
     from fastapi import FastAPI, HTTPException
@@ -35,7 +36,7 @@ if FastAPI:
         yield
         reset_backend()
 
-    app = FastAPI(title="ACM Agent", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="ACM Agent", version=__version__, lifespan=lifespan)
     web_directory = Path(__file__).with_name("web")
     app.mount("/static", StaticFiles(directory=web_directory), name="static")
 
@@ -52,6 +53,9 @@ if FastAPI:
 
     class ExecuteRequest(BaseModel):
         mode: Literal["compile", "run", "compare", "stress"] = "run"
+        language: Language = "cpp"
+        reference_language: Language | None = None
+        generator_language: Language | None = None
         code: str = Field(min_length=1, max_length=100_000)
         input_data: str = Field(default="", max_length=100_000)
         reference_code: str = Field(default="", max_length=100_000)
@@ -64,7 +68,7 @@ if FastAPI:
         @model_validator(mode="after")
         def validate_sources(self):
             if not self.code.strip():
-                raise ValueError("请提供 C++ 源代码")
+                raise ValueError("请提供源代码")
             if self.mode in {"compare", "stress"} and not self.reference_code.strip():
                 raise ValueError("差分与对拍需要参考程序")
             if self.mode == "stress" and not self.generator_code.strip():
@@ -103,26 +107,35 @@ if FastAPI:
         trace = []
         try:
             if request.mode == "compile":
-                result = check_cpp(request.code)
+                result = check_code(request.code, language=request.language)
             elif request.mode == "run":
-                result = judge_cpp(
-                    request.code, request.input_data, timeout=request.timeout, progress=trace.append
+                result = run_code(
+                    request.code, request.input_data, timeout=request.timeout, progress=trace.append,
+                    language=request.language,
                 )
             elif request.mode == "compare":
-                result = compare_cpp(
+                result = compare_code(
                     request.code, request.reference_code,
                     request.test_cases or [request.input_data],
                     timeout=request.timeout, progress=trace.append,
                     budget_seconds=30.0,
+                    language=request.language, reference_language=request.reference_language,
                 )
             else:
-                result = stress_cpp(
+                result = stress_code(
                     request.code, request.reference_code, request.generator_code,
                     iterations=request.iterations, start_seed=request.start_seed,
                     timeout=request.timeout, progress=trace.append, budget_seconds=30.0,
+                    language=request.language, reference_language=request.reference_language,
+                    generator_language=request.generator_language,
                 )
             return {
                 "result": result, "trace": trace,
+                "languages": {
+                    "candidate": request.language,
+                    "reference": request.reference_language or request.language,
+                    "generator": request.generator_language or request.language,
+                },
                 "duration_ms": int((time.monotonic() - started) * 1000),
             }
         finally:

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="ACM Agent — 使用真实 C++ 工具的算法竞赛教练">
+  <meta name="description" content="ACM Agent — 支持 C++、C、Python、Java 的算法竞赛教练">
   <title>ACM Agent</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css">
@@ -18,7 +18,7 @@
       <button id="new-chat" class="new-chat" type="button"><span>＋</span> 新对话</button>
       <nav class="view-nav" aria-label="工作区">
         <button id="chat-tab" type="button" class="active" aria-pressed="true">◈ <span>教练对话</span></button>
-        <button id="lab-tab" type="button" aria-pressed="false">⌘ <span>代码验证</span><small>C++20</small></button>
+        <button id="lab-tab" type="button" aria-pressed="false">⌘ <span>代码验证</span><small>4 LANGS</small></button>
       </nav>
       <div class="history-section"><p class="eyebrow">最近对话</p><div id="session-list" aria-label="历史对话"><p class="empty-history">还没有对话记录</p></div></div>
       <div id="environment" class="environment"><span class="eyebrow">运行环境</span><p id="environment-detail">正在检查…</p><small id="model-detail"></small></div>
@@ -38,7 +38,7 @@
           <div class="hero-mark">&lt;/&gt;</div>
           <p class="eyebrow">YOUR COMPETITIVE EDGE</p>
           <h2>从一个思路，<br>到一份可靠的代码。</h2>
-          <p>讨论算法、推敲边界，用真实 C++ 工具检验每一个假设。<br>还没有模型密钥？直接打开代码验证，开始你的第一次对拍。</p>
+          <p>用 C++、C、Python、Java 讨论算法、推敲边界，调用真实工具验证。<br>还没有模型密钥？直接打开代码验证，开始你的第一次对拍。</p>
           <div class="suggestions">
             <button type="button" data-prompt="请分析下面算法的正确性与时间复杂度：\n\n"><strong>01 · 拆解思路</strong><span>正确性、复杂度与边界条件</span></button>
             <button type="button" data-lab="run"><strong>02 · 运行代码</strong><span>真实编译，查看输出与诊断</span></button>
@@ -49,7 +49,7 @@
 
       <footer class="composer-wrap">
         <form id="chat-form" class="composer">
-          <textarea id="message-input" rows="1" maxlength="100000" placeholder="粘贴题面、C++ 代码或测试数据…" aria-label="消息" required></textarea>
+          <textarea id="message-input" rows="1" maxlength="100000" placeholder="粘贴题面、C++ / C / Python / Java 代码或测试数据…" aria-label="消息" required></textarea>
           <div class="composer-bottom">
             <span>Enter 发送 · Shift + Enter 换行</span>
             <button id="send-button" type="submit" aria-label="发送消息">➜</button>
@@ -59,15 +59,16 @@
       </footer>
     </main>
     <main id="lab-panel" class="lab-panel" hidden>
-      <header><button class="icon-button lab-menu" type="button" aria-label="打开菜单">☰</button><div><h1>代码验证</h1><p>每一次判断，都有执行证据</p></div><span class="version-tag">C++20 / -O2</span></header>
+      <header><button class="icon-button lab-menu" type="button" aria-label="打开菜单">☰</button><div><h1>代码验证</h1><p>每一次判断，都有执行证据</p></div><span id="language-badge" class="version-tag">C++20</span></header>
       <div class="lab-scroll">
         <div class="lab-intro"><p class="eyebrow">THE PROVING GROUND</p><h2>让代码自己说话。</h2><p>编译、运行、对比和对拍。无需模型密钥。</p></div>
         <form id="execute-form">
-          <div class="lab-toolbar"><label>验证方式<select id="execute-mode"><option value="run">编译并运行</option><option value="compile">仅编译检查</option><option value="compare">差分测试</option><option value="stress">随机对拍</option></select></label><button id="load-example" class="secondary-button" type="button">载入示例</button><button id="download-result" class="text-button" type="button" disabled>下载结果 ↓</button></div>
+          <div class="lab-toolbar"><label>候选程序语言<select id="code-language"><option value="cpp">C++20</option><option value="c">C17</option><option value="python">Python 3</option><option value="java">Java 17</option></select></label><label>验证方式<select id="execute-mode"><option value="run">编译并运行</option><option value="compile">编译 / 语法检查</option><option value="compare">差分测试</option><option value="stress">随机对拍</option></select></label><button id="load-example" class="secondary-button" type="button">载入示例</button><button id="download-result" class="text-button" type="button" disabled>下载结果 ↓</button></div>
+          <p id="language-help" class="result-hint">支持四种语言及混合语言对拍。</p>
           <div class="editors">
-            <label class="editor-card"><span class="editor-title"><strong>Candidate</strong><small>待验证的 C++20 程序</small></span><textarea id="candidate-code" spellcheck="false" aria-label="待验证代码" maxlength="100000" required placeholder="#include <iostream>&#10;int main() {&#10;    // Your solution&#10;}"></textarea></label>
-            <label id="reference-field" class="editor-card" hidden><span class="editor-title"><strong>Reference</strong><small>可信的参考程序</small></span><textarea id="reference-code" spellcheck="false" aria-label="参考程序" maxlength="100000"></textarea></label>
-            <label id="generator-field" class="editor-card" hidden><span class="editor-title"><strong>Generator</strong><small>从 stdin 读取种子，向 stdout 输出测试数据</small></span><textarea id="generator-code" spellcheck="false" aria-label="数据生成器" maxlength="100000"></textarea></label>
+            <label class="editor-card"><span class="editor-title"><strong>Candidate</strong><small id="candidate-label">待验证的 C++20 程序</small></span><textarea id="candidate-code" spellcheck="false" aria-label="待验证代码" maxlength="100000" required placeholder="#include <iostream>&#10;int main() {&#10;    // Your solution&#10;}"></textarea></label>
+            <div id="reference-field" class="editor-card" hidden><div class="editor-title"><strong>Reference</strong><select id="reference-language" aria-label="参考程序语言"><option value="same">与候选相同</option><option value="cpp">C++20</option><option value="c">C17</option><option value="python">Python 3</option><option value="java">Java 17</option></select></div><textarea id="reference-code" spellcheck="false" aria-label="参考程序" maxlength="100000"></textarea></div>
+            <div id="generator-field" class="editor-card" hidden><div class="editor-title"><strong>Generator</strong><select id="generator-language" aria-label="生成器语言"><option value="same">与候选相同</option><option value="cpp">C++20</option><option value="c">C17</option><option value="python">Python 3</option><option value="java">Java 17</option></select></div><textarea id="generator-code" spellcheck="false" aria-label="数据生成器" maxlength="100000" placeholder="从 stdin 读取种子，向 stdout 输出测试数据"></textarea></div>
           </div>
           <div class="run-settings"><label id="stdin-field" class="stdin-field">标准输入 <small>留空也可以运行；差分时作为一个测试用例</small><textarea id="stdin" rows="4" spellcheck="false" maxlength="100000" aria-label="标准输入" placeholder="3&#10;-2 -5 -1"></textarea></label><div class="limits"><label>单次运行限时（秒）<input id="run-timeout" type="number" min="0.05" max="10" step="0.05" value="2" required></label><label class="stress-setting" hidden>测试轮数<input id="iterations" type="number" min="1" max="1000" value="100" required></label><label class="stress-setting" hidden>起始种子<input id="start-seed" type="number" min="0" max="9007199254740991" value="1" required></label></div></div>
           <div class="execute-bottom"><p id="execution-note">本地模式仅运行可信代码 · 有限测试不能证明正确性</p><button id="execute-button" class="primary-button" type="submit">▶ 运行验证</button></div>

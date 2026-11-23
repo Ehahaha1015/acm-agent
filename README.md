@@ -2,7 +2,7 @@
 
 **从一个思路，到一份可靠的代码。**
 
-DeepSeek 讲清算法与边界，真实 C++20 编译器给出执行证据。把题目、代码和疑问放进来，带着标准输出、编译诊断或可复现的反例继续改进。
+DeepSeek 讲清算法与边界，**C++20、C17、Python 3、Java 17** 的真实工具链给出执行证据。把题目、代码和疑问放进来，带着标准输出、编译或语法诊断、可复现的反例继续改进。
 
 [![CI](https://github.com/Ehahaha1015/acm-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Ehahaha1015/acm-agent/actions/workflows/ci.yml)
 
@@ -10,15 +10,40 @@ DeepSeek 讲清算法与边界，真实 C++20 编译器给出执行证据。把�
 
 ![ACM Agent 浏览器工作台首页](docs/images/overview.png)
 
+## 四种语言，同一套验证流程
+
+在工作台选择语言、载入示例，即可进行 **编译 / 语法检查 → 运行 → 差分测试 → 随机对拍**。教练对话识别 `cpp`、`c`、`python`、`java` 代码块；DeepSeek 也能按指定语言生成程序并调用真实工具。
+
+| 语言 | 检查方式与入口 | 运行 / 差分 / 对拍 | 本地工具链 |
+| --- | --- | --- | --- |
+| C++20 | `g++ -std=c++20 -O2`，`main` | 全部支持 | G++ |
+| C17 | `gcc -std=c17 -O2`，`main`，链接 `libm` | 全部支持 | GCC |
+| Python 3 | `py_compile` 检查语法，再以 `-I -X utf8` 运行 | 全部支持 | 默认使用 ACM Agent 自身的 Python |
+| Java 17 | `javac --release 17 -encoding UTF-8`，`class Main`，不写 `package` | 全部支持 | JDK 17 或更高版本，同时需要 `javac` 和 `java` |
+
+Python 的“检查通过”表示语法可编译，并不执行顶层代码；缺少模块、异常等运行问题会在实际运行时报告。Python 不自动安装第三方包。Java 使用单文件 `Main.java`，默认最大堆 128 MiB；四种语言均有单次运行超时、输出上限和工作目录清理。
+
+| Python：真实运行，输出 `-1` | Java：编译成字节码后实际运行 |
+| --- | --- |
+| ![Python 3 工作台真实运行画面](docs/images/python-run.png) | ![Java 17 工作台真实运行画面](docs/images/java-run.png) |
+
+### C 候选 × Java 参考 × Python 生成器
+
+参考解可以用熟悉的另一种语言实现，生成器也可以单独选择 Python。把候选语言选为 **C17**、Reference 选为 **Java 17**、Generator 选为 **Python 3**，再点击“载入示例 → 开始对拍”。下面这次运行在种子 `1` 找到 Candidate `0` / Reference `-10` 的真实反例。
+
+![C17 候选、Java17 参考和 Python3 生成器的真实混合语言对拍](docs/images/mixed-stress.png)
+
+语言与代码、输入、种子一起保存在下载的结果 JSON 中。切换语言不会自动翻译或覆盖当前源码，请载入对应示例或粘贴该语言的代码。
+
 ## 一道负数题，走完一次排错
 
 “求数组最大值”很简单，直到所有数都是负数，而答案初值恰好写成了 `0`。
 
 ### ① 把疑问交给教练，把运行交给工具
 
-直接问：“数组 `[-2, -5, -1]` 的最大值为什么不能从 `0` 开始算？”DeepSeek 会结合真实工具调用解释问题、复杂度和安全写法。下面是一次实际对话：正确版本得到 `-1`，错误初值的版本得到 `0`；展开的工具卡片保留了错误版本的真实输出。
+直接问：“数组 `[-2, -5, -1]` 的最大值为什么不能从 `0` 开始算？”DeepSeek 会结合真实工具调用解释问题、复杂度和安全写法。下面这次对话让模型调用 `stress_code`，以 C 候选、Java 参考和 Python 生成器实际对拍：错误候选输出 `0`，正确参考输出 `-1`，工具卡片保留完整反例与语言信息。
 
-![DeepSeek 实际调用 C++ 工具并解释全负数数组的初始化错误](docs/images/deepseek-coach.png)
+![DeepSeek 实际调用多语言工具并解释全负数数组的初始化错误](docs/images/deepseek-coach.png)
 
 ### ② 写一份代码，立刻听见回声
 
@@ -44,7 +69,7 @@ DeepSeek 讲清算法与边界，真实 C++20 编译器给出执行证据。把�
 
 ## 快速启动
 
-需要 Python 3.12+、[uv](https://docs.astral.sh/uv/getting-started/installation/) 和支持 C++20 的 `g++`。Windows 可使用 MinGW-w64，并将其 `bin` 目录加入 PATH；Ubuntu 可安装 `g++`。
+运行 ACM Agent 需要 Python 3.12+ 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)。使用全部语言还需 GCC / G++ 与 JDK 17+。Windows 可使用 MinGW-w64 和已安装的 JDK，将各自 `bin` 目录加入 PATH；Ubuntu 可安装 `gcc g++ openjdk-17-jdk-headless`。也可直接使用下文的多语言 Docker 镜像。
 
 ```powershell
 git clone https://github.com/Ehahaha1015/acm-agent.git
@@ -56,7 +81,11 @@ uv run acm-agent --web
 
 打开 [本地工作台](http://127.0.0.1:8000)。Windows 也可执行 `powershell -ExecutionPolicy Bypass -File .\start.ps1`。服务默认只监听本机；使用 `--port 8001` 可以更换端口。
 
+`--doctor` 和网页侧栏会显示四种本地工具链的就绪状态。仅安装 Python 时仍能使用 Python；缺少某个编译器会返回 `TOOLCHAIN_UNAVAILABLE`，不会把环境问题说成代码错误。可在本地 `.env` 中用 `ACM_CC`、`ACM_CXX`、`ACM_PYTHON`、`ACM_JAVAC`、`ACM_JAVA` 指定可执行文件路径。Docker 模式的本地就绪状态不代表容器内工具链状态。
+
 ## 成品验收：不用密钥也能完成
+
+先依次选择 C++20、C17、Python 3、Java 17，每次“编译并运行 → 载入示例 → 运行验证”都应输出 `-1`。选择 Python 的“编译 / 语法检查”时，按钮和结果会明确显示语法检查。四种语言的对拍示例都包含错误初值，能够找到可复现的负数反例。以下保留一套完整的 C++ 验收步骤：
 
 1. 打开 **代码验证 → 编译并运行 → 载入示例 → 运行验证**。示例求负数数组的最大值，标准输出为 `-1`。
 2. 切换到 **随机对拍 → 载入示例 → 开始对拍**。故意有错的 Candidate 将答案初始化为 `0`；Reference 使用 `LLONG_MIN`。页面展示 `WRONG_ANSWER_FOUND`、种子、反例输入和两份输出。
@@ -144,24 +173,26 @@ uv run acm-agent --session <已有会话ID>
 
 ## 执行模式与限制
 
-默认 `ACM_EXECUTOR=local` 直接在本机运行程序，**仅用于自己信任的代码**。不要将该服务直接暴露到公网。代码与输入各限 100000 字符，HTTP 工作台最多同时接纳两个执行任务，超额返回 429。运行输出每个流最多捕获 1 MiB 字符，超过后终止进程并报告 `OUTPUT_LIMIT_EXCEEDED`，不会将截断输出误判为通过。
+默认 `ACM_EXECUTOR=local` 直接在本机运行程序，**仅用于自己信任的代码**。不要将该服务直接暴露到公网。代码与输入各限 100000 字符，HTTP 工作台最多同时接纳两个执行任务，超额返回 429。运行输出每个流最多捕获 1048576 个字符，超过后终止进程并报告 `OUTPUT_LIMIT_EXCEEDED`，不会将截断输出误判为通过。运行时长包含解释器 / JVM 启动时间。
 
 使用 Docker 执行后端前，先启动 Docker 并准备镜像：
 
 ```bash
-docker pull gcc:14
+docker build -f Dockerfile.runtime -t acm-agent-runtime:latest .
 ```
 
 ```dotenv
 ACM_EXECUTOR=docker
-ACM_DOCKER_IMAGE=gcc:14
+ACM_DOCKER_IMAGE=acm-agent-runtime:latest
 ACM_DOCKER_WORKERS=2
-ACM_DOCKER_MEMORY=256m
+ACM_DOCKER_MEMORY=512m
 ACM_DOCKER_CPUS=1.0
 ACM_DOCKER_NETWORK=false
 ```
 
-Docker 后端使用只读根文件系统、临时工作目录、网络关闭、CPU/内存/进程数限制和降权参数。一项差分或对拍任务租用一个工作节点，各程序使用独立目录；单节点也能完成对拍。模型工具遵循同一执行后端，Docker 不可用时返回 `SANDBOX_UNAVAILABLE`，不会回退到本机执行。容器与节点会复用，这不是面向敌对多租户提交的完整在线评测沙箱。
+运行镜像包含 Python 3.12、GCC / G++ 和 OpenJDK 17；原有 `gcc:14` 镜像不包含全部语言，请重新构建并切换。Docker 后端使用只读根文件系统、临时工作目录、网络关闭、CPU/内存/进程数限制和降权参数。一项差分或对拍任务租用一个工作节点，各程序使用独立目录；单节点也能完成混合语言对拍。模型工具遵循同一执行后端，Docker 不可用时返回 `SANDBOX_UNAVAILABLE`，不会回退到本机执行。容器与节点会复用，这不是面向敌对多租户提交的完整在线评测沙箱。
+
+`ACM_MEMORY_LIMIT_MB` 在支持的平台上对本地 C / C++ / Python 设置地址空间上限。Java 由 JVM 堆参数控制，跳过这个地址空间限制以免 JVM 预留虚拟内存失败；Docker 的整体物理内存限制仍作用于所有语言。
 
 Web 随机对拍限 1–1000 轮、单次运行限时 0.05–10 秒，对拍总预算 30 秒（包含编译；边界处可能等待当前操作结束）。预算耗尽返回 `STRESS_TIME_LIMIT`，不报告通过。默认编译限时 10 秒，Windows 首次启动编译器较慢时可调高 `ACM_COMPILE_TIMEOUT_MS`。`ACM_DATABASE` 可指定 SQLite 路径；旧数据库会自动增加工具结果字段并保留已有消息。
 
@@ -179,7 +210,7 @@ docker run --rm -p 127.0.0.1:8000:8000 --env-file .env -v acm-data:/app/workspac
 | 方法与路径 | 用途 |
 | --- | --- |
 | `GET /health` | 服务存活状态 |
-| `GET /status` | 执行模式、编译器是否在 PATH、模型配置状态；不含密钥，不探测 Docker 守护进程 |
+| `GET /status` | 四种语言的本地工具链状态、模型配置状态；不含密钥，不探测 Docker 守护进程 |
 | `POST /execute` | 结构化编译、运行、差分与对拍；返回 `result`、`trace`、`duration_ms` |
 | `POST /chat` | `{message, session_id?}`，返回回答、会话 ID 与工具证据 |
 | `GET /sessions` | 最近 100 段对话 |
@@ -189,23 +220,26 @@ docker run --rm -p 127.0.0.1:8000:8000 --env-file .env -v acm-data:/app/workspac
 `/execute` 请求示例：
 
 ```json
-{"mode":"run","code":"#include <iostream>\nint main(){std::cout<<42;}","input_data":"","timeout":2}
+{"mode":"run","language":"python","code":"print(sum(map(int, input().split())))","input_data":"1 2 3\n","timeout":2}
 ```
 
-差分模式提供 `reference_code` 与 `test_cases`（最多 100 个、总长度最多 100000 字符）；不传用例列表时，以 `input_data` 作为单个用例。对拍模式再提供 `generator_code`、`iterations` 和 `start_seed`。生成器从 stdin 读取种子，向 stdout 输出非空测试输入；比较时忽略空白差异。
+`language` 接受 `cpp`、`c`、`python`、`java`，省略时默认 `cpp`，兼容旧请求。`reference_language`、`generator_language` 分别指定参考程序与生成器语言，省略时跟随候选语言。
+
+差分模式提供 `reference_code` 与 `test_cases`（最多 100 个、总长度最多 100000 字符）；不传用例列表时，以 `input_data` 作为单个用例。对拍模式再提供 `generator_code`、`iterations` 和 `start_seed`。生成器从 stdin 读取种子，向 stdout 输出非空测试输入；比较时忽略空白差异。回复包含 `languages`，下载结果也保留源代码与每个角色的语言。
 
 ```python
-from acm_agent.tools import compare_cpp, judge_cpp, stress_cpp
-from acm_agent.tools.cpp_tools import check_cpp
+from acm_agent.tools import check_code, run_code, compare_code, stress_code
 
-check_cpp("int main(){}")  # 遵循所选后端并清理临时文件
-judge_cpp(candidate_code, "3\n-2 -5 -1\n")
-compare_cpp(candidate_code, reference_code, ["3\n-2 -5 -1\n"])
-stress_cpp(candidate_code, reference_code, generator_code,
-           iterations=100, start_seed=1, budget_seconds=30)
+check_code("print('hello')", language="python")  # 只检查，不运行顶层代码
+run_code("print(sum(map(int, input().split())))", "1 2 3\n", language="python")
+compare_code(c_candidate, java_reference, ["3\n-2 -5 -1\n"],
+             language="c", reference_language="java")
+stress_code(c_candidate, java_reference, python_generator,
+            language="c", reference_language="java", generator_language="python",
+            iterations=100, start_seed=1, budget_seconds=30)
 ```
 
-底层兼容接口 `compile_cpp` / `run_cpp` 面向可信本地程序，并保留可执行文件供调用者使用；Web 与模型使用会清理工作目录的后端接口。
+旧的 `judge_cpp`、`compare_cpp`、`stress_cpp` 继续可用，均复用同一执行流程。底层兼容接口 `compile_cpp` / `run_cpp` 面向可信本地程序，并保留可执行文件供调用者使用；Web 与模型使用会清理工作目录的后端接口。
 
 ## 开发与验证
 
@@ -214,15 +248,18 @@ uv sync --frozen
 uv run ruff check .
 uv run pytest -q
 uv run python scripts/check_secrets.py --all
+uv run python scripts/smoke_languages.py --executor local
+# 构建运行镜像后，可验证真实 Docker 工具链：
+uv run python scripts/smoke_languages.py --executor docker
 node --check src/acm_agent/api/web/app.js
 node --check src/acm_agent/api/web/lab.js
 ```
 
-自动化测试不需要密钥，使用隔离 SQLite 数据库，并显式屏蔽本机模型配置，避免测试产生真实 API 费用。覆盖真实 C++ 编译运行、超时、差分反例、种子复现、API 校验、会话迁移恢复、输出上限、DeepSeek 参数兼容、错误脱敏和提交前密钥拦截。Docker 调度采用可控 transport 测试；真实容器运行还依赖本机 Docker 守护进程和镜像。CI 在 Python 3.12 / 3.13 上执行密钥检查、Ruff 与 pytest。
+自动化测试不需要密钥，使用隔离 SQLite 数据库，并显式屏蔽本机模型配置，避免测试产生真实 API 费用。覆盖四种语言的真实编译或语法检查、运行、中文输出、异常退出、超时、输出上限、反例复现，以及混合语言 HTTP 对拍、模型工具 schema、DeepSeek 参数兼容和密钥拦截。CI 在 Python 3.12 / 3.13 + JDK 17 上执行密钥检查、Ruff 与 pytest；独立 Docker 任务构建运行镜像，再对四种语言实际运行与对拍。
 
 ### 本次实测记录
 
-2026-11-23：Windows 本机已实际连接 DeepSeek，完成“生成 C++ → 工具执行 → 解释负数初始化错误”的完整调用。工作台运行示例输出 `-1`；随机对拍种子 `1` 找到 Candidate `0` / Reference `-29` 的反例。文中截图来自这些实际操作，密钥与个人历史记录未入图。
+2026-11-23，v0.3.0：Windows 本机实际运行 C++、C、Python、Java 的示例，均输出 `-1`，四种语言均找到种子 `1` 的对拍反例。DeepSeek 已实际调用 `stress_code`，完成 C 候选 / Java 参考 / Python 生成器的混合语言对拍。文中截图来自实际操作，密钥与个人历史记录未入图。
 
 ```mermaid
 flowchart LR
@@ -230,6 +267,6 @@ flowchart LR
   API --> Tools[编译 / 运行 / 差分 / 对拍]
   API --> Model[可选 Agents SDK 模型]
   Model --> Tools
-  Tools --> Backend[本地执行 / Docker 工作池]
+  Tools --> Backend[C++ / C / Python / Java 本地执行或 Docker 工作池]
   API --> DB[(SQLite 会话与执行证据)]
 ```

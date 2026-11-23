@@ -35,7 +35,7 @@ def _answer(coach: Coach, message: str, history: list[dict] | None = None) -> st
 
 def main() -> None:
     configure_stdio()
-    parser = argparse.ArgumentParser(description="ACM Agent · C++20 算法教练与验证工作台")
+    parser = argparse.ArgumentParser(description="ACM Agent · C++ / C / Python / Java 算法教练")
     parser.add_argument("--web", action="store_true", help="启动浏览器工作台")
     parser.add_argument("--host", default="127.0.0.1", help="Web 监听地址（默认仅本机）")
     parser.add_argument("--port", type=int, default=8000)

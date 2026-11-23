@@ -16,6 +16,7 @@ Backends are process-wide singletons created by :func:`get_backend`, which reads
 
 from __future__ import annotations
 
+import shlex
 import shutil
 import tempfile
 import threading
@@ -23,10 +24,10 @@ import uuid
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import Any, Protocol
 
 from acm_agent.execution.executor import (
-    DEFAULT_FLAGS,
     OUTPUT_LIMIT_EXIT_CODE,
     CompileResult,
     ExecutionResult,
@@ -35,6 +36,7 @@ from acm_agent.execution.executor import (
     run_program,
     truncate_output,
 )
+from acm_agent.execution.languages import normalize_language, program_plan
 
 DOCKER_TIMEOUT_EXIT_CODES = frozenset({124, 137, 143})
 CONTAINER_WORKROOT = "/tmp/acm-agent"
@@ -58,7 +60,7 @@ class ExecutionBackend(Protocol):
     def workspaces(self, count: int) -> Any:
         ...
 
-    def compile(self, workspace: str, code: str, *, timeout: float = 10.0) -> CompileResult:
+    def compile(self, workspace: str, code: str, *, timeout: float = 10.0, language: str = "cpp") -> CompileResult:
         ...
 
     def run(
@@ -98,8 +100,8 @@ class LocalBackend:
             self._roots = [item for item in self._roots if item != root]
             shutil.rmtree(root, ignore_errors=True)
 
-    def compile(self, workspace: str, code: str, *, timeout: float = 10.0) -> CompileResult:
-        return compile_program(code, timeout=timeout, workdir=workspace)
+    def compile(self, workspace: str, code: str, *, timeout: float = 10.0, language: str = "cpp") -> CompileResult:
+        return compile_program(code, timeout=timeout, workdir=workspace, language=language)
 
     @contextmanager
     def workspaces(self, count: int) -> Iterator[list[str]]:
@@ -120,7 +122,8 @@ class LocalBackend:
             compiled.executable,
             input_data,
             timeout=timeout,
-            memory_limit_mb=self.memory_limit_mb,
+            memory_limit_mb=None if compiled.language == "java" else self.memory_limit_mb,
+            command=compiled.run_command,
         )
 
     def close(self) -> None:
@@ -151,9 +154,9 @@ def _docker_runner(
 class DockerBackend:
     """Reusable containers that compile and run untrusted submissions in isolation."""
 
-    image: str = "gcc:14"
+    image: str = "acm-agent-runtime:latest"
     workers: int = 2
-    memory: str = "256m"
+    memory: str = "512m"
     cpus: str = "1.0"
     network: bool = False
     compile_timeout: float = 30.0
@@ -307,34 +310,42 @@ class DockerBackend:
             timeout=timeout,
         )
 
-    def compile(self, workspace: str, code: str, *, timeout: float = 10.0) -> CompileResult:
+    def compile(self, workspace: str, code: str, *, timeout: float = 10.0, language: str = "cpp") -> CompileResult:
+        try:
+            language = normalize_language(language)
+        except ValueError as exc:
+            return CompileResult("UNSUPPORTED_LANGUAGE", stderr=str(exc))
         container, directory = self._split(workspace)
         budget = max(0.01, timeout)
-        flags = " ".join(DEFAULT_FLAGS)
+        plan = program_plan(language, PurePosixPath(directory), docker=True)
         prepare = (
-            f"mkdir -p {directory} && cat > {directory}/source.cpp && "
-            f"timeout -s KILL {budget:.2f}s g++ {directory}/source.cpp {flags} "
-            f"-o {directory}/program"
+            f"mkdir -p {directory} && cat > {plan.source} && "
+            f"timeout -s KILL {budget:.2f}s {shlex.join(plan.compile_command)} && test -f {plan.artifact}"
         )
         exit_code, stdout, stderr, timed_out = self._exec(
             container, prepare, input_text=code, timeout=budget + 60.0
         )
-        executable = f"docker://{container}{directory}/program"
+        executable = f"docker://{container}{plan.artifact}"
         if timed_out or exit_code in DOCKER_TIMEOUT_EXIT_CODES:
             return CompileResult(
                 "COMPILE_TIMEOUT",
                 stdout=stdout,
                 stderr=stderr or "compilation exceeded the time limit",
                 exit_code=exit_code,
+                language=language,
             )
         ok = exit_code == 0
+        if not ok and not stderr and language == "java":
+            stderr = "Java submissions must declare class Main without a package."
         return CompileResult(
-            status="COMPILE_OK" if ok else "COMPILE_ERROR",
+            status="COMPILE_OK" if ok else ("TOOLCHAIN_UNAVAILABLE" if exit_code == 127 else "COMPILE_ERROR"),
             executable=executable if ok else None,
             stdout=truncate_output(stdout),
             stderr=truncate_output(stderr),
             exit_code=exit_code,
-            command=["docker", "exec", container, "g++", f"{directory}/source.cpp", *DEFAULT_FLAGS],
+            command=["docker", "exec", container, *plan.compile_command],
+            language=language,
+            run_command=plan.run_command if ok else None,
         )
 
     def run(
@@ -348,10 +359,11 @@ class DockerBackend:
         if not compiled.executable:
             return ExecutionResult("RUNTIME_ERROR", stderr="no executable was produced")
         container, program = self._split(compiled.executable)
+        _, working_directory = self._split(workspace)
         budget = max(0.01, timeout)
         exit_code, stdout, stderr, client_timeout = self._exec(
             container,
-            f"timeout -s KILL {budget:.2f}s {program}",
+            f"cd {working_directory} && timeout -s KILL {budget:.2f}s {shlex.join(compiled.run_command or [program])}",
             input_text=input_data,
             timeout=budget + 30.0,
         )

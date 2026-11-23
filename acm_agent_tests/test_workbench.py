@@ -152,7 +152,8 @@ def test_sdk_tools_honor_selected_backend(monkeypatch):
 def test_sdk_agent_tool_schemas_are_valid():
     agent = Coach.build_sdk_agent(model="test-model")
     assert {tool.name for tool in agent.tools} == {
-        "compile_cpp", "run_cpp", "judge_cpp", "compare_cpp", "stress_cpp"
+        "compile_cpp", "run_cpp", "judge_cpp", "compare_cpp", "stress_cpp",
+        "compile_code", "run_code", "compare_code", "stress_code",
     }
 
 

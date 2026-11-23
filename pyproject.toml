@@ -1,7 +1,7 @@
 [project]
 name = "acm-agent"
-version = "0.2.0"
-description = "ACM Agent - an AI competitive programming coach with real C++ execution"
+version = "0.3.0"
+description = "ACM Agent - a multilingual competitive programming coach with real execution"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

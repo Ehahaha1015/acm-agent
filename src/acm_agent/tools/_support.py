@@ -17,7 +17,7 @@ def backend() -> ExecutionBackend:
 
 
 def run_timeout(timeout: float | None) -> float:
-    return float(timeout) if timeout is not None else get_settings().run_timeout
+    return min(10.0, max(0.05, float(timeout) if timeout is not None else get_settings().run_timeout))
 
 
 def compile_timeout(timeout: float | None) -> float:

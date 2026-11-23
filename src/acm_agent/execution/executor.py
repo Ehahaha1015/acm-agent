@@ -27,7 +27,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from acm_agent.config import get_settings
+from acm_agent.execution.languages import normalize_language, program_plan
 from acm_agent.textutil import sanitize_text
 
 MAX_OUTPUT = 16_384
@@ -57,6 +57,8 @@ class CompileResult:
     exit_code: int | None = None
     command: list[str] | None = None
     duration_ms: int = 0
+    language: str = "cpp"
+    run_command: list[str] | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -221,31 +223,35 @@ def compile_program(
     workdir: str | Path | None = None,
     flags: Sequence[str] | None = None,
     compiler: str | None = None,
+    language: str = "cpp",
 ) -> CompileResult:
-    """Compile C++20 source with g++, returning diagnostics and an executable path."""
+    """Prepare a supported single-file program and return its launch command."""
+    try:
+        language = normalize_language(language)
+    except ValueError as exc:
+        return CompileResult("UNSUPPORTED_LANGUAGE", stderr=str(exc), language=language)
     if not isinstance(code, str):
         return CompileResult("COMPILE_ERROR", stderr="code must be a string")
-    root = Path(workdir) if workdir else Path(tempfile.mkdtemp(prefix="acm-agent-"))
+    root = (Path(workdir) if workdir else Path(tempfile.mkdtemp(prefix="acm-agent-"))).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    source = root / "source.cpp"
-    executable = root / ("program.exe" if os.name == "nt" else "program")
+    plan = program_plan(language, root)
+    source, executable = Path(plan.source), Path(plan.artifact)
     source.write_text(sanitize_text(code), encoding="utf-8")
-    command = [
-        compiler or get_settings().cpp_compiler,
-        str(source),
-        *(flags if flags is not None else DEFAULT_FLAGS),
-        "-o",
-        str(executable),
-    ]
+    command = plan.compile_command
+    if compiler:
+        command[0] = compiler
+    if flags is not None and language in {"cpp", "c"}:
+        command = [command[0], str(source), *flags, "-o", str(executable)]
     try:
         stdout, stderr, exit_code, timed_out, elapsed_ms = run_command(
             command, timeout=timeout, cwd=root
         )
     except FileNotFoundError:
         return CompileResult(
-            "COMPILE_ERROR",
+            "TOOLCHAIN_UNAVAILABLE",
             stderr=f"{command[0]} was not found on PATH",
             command=command,
+            language=language,
         )
     if timed_out:
         return CompileResult(
@@ -254,8 +260,11 @@ def compile_program(
             stderr=truncate_output(stderr),
             command=command,
             duration_ms=elapsed_ms,
+            language=language,
         )
     ok = exit_code == 0 and executable.exists()
+    if exit_code == 0 and not ok and language == "java":
+        stderr = "Java submissions must declare class Main without a package."
     return CompileResult(
         status="COMPILE_OK" if ok else "COMPILE_ERROR",
         executable=str(executable) if ok else None,
@@ -264,6 +273,8 @@ def compile_program(
         exit_code=exit_code,
         command=command,
         duration_ms=elapsed_ms,
+        language=language,
+        run_command=plan.run_command if ok else None,
     )
 
 
@@ -273,6 +284,7 @@ def run_program(
     *,
     timeout: float = 2.0,
     memory_limit_mb: int | None = None,
+    command: Sequence[str] | None = None,
 ) -> ExecutionResult:
     """Run a compiled executable and classify OK/TLE/RE."""
     path = Path(executable)
@@ -280,14 +292,14 @@ def run_program(
         return ExecutionResult("RUNTIME_ERROR", stderr=f"executable was not found: {path}")
     try:
         stdout, stderr, exit_code, timed_out, elapsed_ms = run_command(
-            [str(path)],
+            command or [str(path)],
             input_text=input_data,
             timeout=timeout,
             cwd=path.parent,
             memory_limit_mb=memory_limit_mb,
         )
     except FileNotFoundError:
-        return ExecutionResult("RUNTIME_ERROR", stderr="executable was not found")
+        return ExecutionResult("TOOLCHAIN_UNAVAILABLE", stderr="runtime was not found on PATH")
     if timed_out:
         return ExecutionResult(
             "TIME_LIMIT_EXCEEDED",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 
 from acm_agent.execution.backend import BackendUnavailable
+from acm_agent.execution.languages import normalize_language
 from acm_agent.tools._support import (
     Progress,
     backend,
@@ -13,22 +14,28 @@ from acm_agent.tools._support import (
 )
 
 
-def judge_cpp(
+def run_code(
     code: str,
     input_data: str,
     timeout: float | None = None,
     progress: Progress | None = None,
+    language: str = "cpp",
 ) -> dict:
     """Compile and run one submission against one input on the active backend."""
+    try:
+        language = normalize_language(language)
+    except ValueError as exc:
+        return {"status": "UNSUPPORTED_LANGUAGE", "message": str(exc)}
     try:
         engine = backend()
         with engine.workspace() as workspace:
             notify(progress, stage="compile", backend=engine.name)
-            compiled = engine.compile(workspace, code, timeout=compile_timeout(None))
+            compiled = engine.compile(workspace, code, timeout=compile_timeout(None), language=language)
             if compiled.status != "COMPILE_OK":
                 notify(progress, stage="compile_failed", status=compiled.status)
                 return {
-                    "status": "COMPILE_TIMEOUT" if compiled.status == "COMPILE_TIMEOUT" else "COMPILE_ERROR",
+                    "status": compiled.status,
+                    "language": language,
                     "compile": compiled.to_dict(),
                     "stdout": "",
                     "stderr": compiled.stderr,
@@ -36,7 +43,7 @@ def judge_cpp(
             notify(progress, stage="run", timeout=run_timeout(timeout))
             result = engine.run(workspace, compiled, input_data, timeout=run_timeout(timeout))
             notify(progress, stage="ran", status=result.status)
-            return {"status": result.status, **result.to_dict()}
+            return {**result.to_dict(), "language": language}
     except BackendUnavailable as exc:
         return sandbox_unavailable(exc)
 
@@ -45,31 +52,38 @@ def normalize_output(output: str) -> str:
     return " ".join(output.split())
 
 
-def compare_cpp(
+def compare_code(
     candidate_code: str,
     reference_code: str,
     test_cases: list[str],
     timeout: float | None = None,
     progress: Progress | None = None,
     budget_seconds: float | None = None,
+    language: str = "cpp",
+    reference_language: str | None = None,
 ) -> dict:
     """Differential-test candidate against reference on explicit cases."""
     if not test_cases:
         return {"status": "INVALID_TEST_CASES", "message": "Provide at least one test case."}
+    try:
+        language = normalize_language(language)
+        reference_language = normalize_language(reference_language or language)
+    except ValueError as exc:
+        return {"status": "UNSUPPORTED_LANGUAGE", "message": str(exc)}
     deadline = time.monotonic() + budget_seconds if budget_seconds is not None else None
     try:
         engine = backend()
         with engine.workspaces(2) as workspaces:
             candidate_ws, reference_ws = workspaces
             notify(progress, stage="compile", target="candidate")
-            candidate = engine.compile(candidate_ws, candidate_code, timeout=compile_timeout(None))
+            candidate = engine.compile(candidate_ws, candidate_code, timeout=compile_timeout(None), language=language)
             if candidate.status != "COMPILE_OK":
                 return {
                     "status": f"CANDIDATE_{candidate.status}",
                     "compile": candidate.to_dict(),
                 }
             notify(progress, stage="compile", target="reference")
-            reference = engine.compile(reference_ws, reference_code, timeout=compile_timeout(None))
+            reference = engine.compile(reference_ws, reference_code, timeout=compile_timeout(None), language=reference_language)
             if reference.status != "COMPILE_OK":
                 return {
                     "status": f"REFERENCE_{reference.status}",
@@ -87,7 +101,7 @@ def compare_cpp(
                 cand = engine.run(candidate_ws, candidate, case, timeout=budget)
                 if cand.status != "OK":
                     return {
-                        "status": "CANDIDATE_TLE" if cand.timed_out else "CANDIDATE_RUNTIME_ERROR",
+                        "status": "CANDIDATE_TLE" if cand.timed_out else f"CANDIDATE_{cand.status}",
                         "test_number": number,
                         "input": case,
                         "candidate": cand.to_dict(),
@@ -95,7 +109,7 @@ def compare_cpp(
                 ref = engine.run(reference_ws, reference, case, timeout=budget)
                 if ref.status != "OK":
                     return {
-                        "status": "REFERENCE_TLE" if ref.timed_out else "REFERENCE_RUNTIME_ERROR",
+                        "status": "REFERENCE_TLE" if ref.timed_out else f"REFERENCE_{ref.status}",
                         "test_number": number,
                         "input": case,
                         "reference": ref.to_dict(),
@@ -116,3 +130,18 @@ def compare_cpp(
             }
     except BackendUnavailable as exc:
         return sandbox_unavailable(exc)
+
+
+def judge_cpp(code: str, input_data: str, timeout: float | None = None, progress: Progress | None = None) -> dict:
+    """Compatibility wrapper for C++20 submissions."""
+    return run_code(code, input_data, timeout=timeout, progress=progress)
+
+
+def compare_cpp(
+    candidate_code: str, reference_code: str, test_cases: list[str],
+    timeout: float | None = None, progress: Progress | None = None,
+    budget_seconds: float | None = None,
+) -> dict:
+    """Compatibility wrapper for C++20 differential tests."""
+    return compare_code(candidate_code, reference_code, test_cases, timeout=timeout,
+                        progress=progress, budget_seconds=budget_seconds)

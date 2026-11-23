@@ -250,9 +250,12 @@ restoreHistory().then(loadSessions);
 
 fetchJSON("/status", {}, 10_000)
   .then((data) => {
+    window.acmRuntimeStatus = data;
+    window.dispatchEvent(new CustomEvent("acm-status", { detail: data }));
     statusDot.className = "online";
     statusText.textContent = "服务运行正常 · v" + data.version;
-    document.querySelector("#environment-detail").textContent = data.executor === "docker" ? "Docker 隔离执行" : (data.compiler_available ? "本地 g++ · 已就绪" : "未找到 g++，请安装 C++ 编译器");
+    const ready = Object.values(data.runtimes || {}).filter((runtime) => runtime.available).length;
+    document.querySelector("#environment-detail").textContent = data.executor === "docker" ? "Docker 隔离执行" : `本地工具链 · ${ready}/4 已就绪`;
     document.querySelector("#model-detail").textContent = data.model_configured
       ? `${data.provider === "deepseek" ? "DeepSeek" : "模型"} · ${data.model}`
       : (data.provider === "deepseek" ? `DeepSeek · ${data.model_name} · 等待本地密钥` : "离线工具模式 · 模型未配置");

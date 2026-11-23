@@ -8,6 +8,10 @@ jobs:
         python: ['3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
       - uses: astral-sh/setup-uv@v5
         with:
           version: latest
@@ -16,3 +20,14 @@ jobs:
       - run: uv run python scripts/check_secrets.py --all
       - run: uv run ruff check .
       - run: uv run pytest
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: latest
+          python-version: '3.12'
+      - run: uv sync --frozen
+      - run: docker build -f Dockerfile.runtime -t acm-agent-runtime:latest .
+      - run: uv run python scripts/smoke_languages.py --executor docker

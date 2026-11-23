@@ -14,6 +14,7 @@ def check_cpp(code: str, timeout: float | None = None) -> dict:
         with engine.workspace() as workspace:
             result = engine.compile(workspace, code, timeout=compile_timeout(timeout)).to_dict()
             result.pop("executable", None)
+            result.pop("run_command", None)
             return result
     except BackendUnavailable as exc:
         return sandbox_unavailable(exc)

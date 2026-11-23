@@ -1,5 +1,5 @@
-FROM python:3.12-slim
-RUN apt-get update && apt-get install -y --no-install-recommends g++ && rm -rf /var/lib/apt/lists/*
+FROM python:3.12-slim-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends gcc g++ openjdk-17-jdk-headless && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY . .
 RUN pip install --no-cache-dir uv && uv sync --frozen --no-dev

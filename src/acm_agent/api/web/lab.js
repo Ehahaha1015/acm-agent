@@ -4,11 +4,34 @@ const resultPanel = document.querySelector("#execution-result");
 let lastExecution = null;
 let executing = false;
 
-const examples = {
-  candidate: '#include <iostream>\n#include <algorithm>\nint main() {\n    int n; std::cin >> n;\n    long long answer = 0, x; // 全为负数时，这个初值正确吗？\n    while (n--) {\n        std::cin >> x;\n        answer = std::max(answer, x);\n    }\n    std::cout << answer << "\\n";\n}\n',
-  reference: '#include <iostream>\n#include <algorithm>\n#include <climits>\nint main() {\n    int n; std::cin >> n;\n    long long answer = LLONG_MIN, x;\n    while (n--) {\n        std::cin >> x;\n        answer = std::max(answer, x);\n    }\n    std::cout << answer << "\\n";\n}\n',
-  generator: '#include <iostream>\n#include <random>\nint main() {\n    unsigned long long seed; std::cin >> seed;\n    std::mt19937_64 rng(seed);\n    std::cout << 5 << "\\n";\n    for (int i = 0; i < 5; ++i)\n        std::cout << -(int)(rng() % 100 + 1) << " ";\n    std::cout << "\\n";\n}\n',
-};
+const languageLabels = { cpp: "C++20", c: "C17", python: "Python 3", java: "Java 17" };
+const examplesReady = fetchJSON("/static/examples.json", {}, 10_000).catch(() => null);
+const languageSelect = document.querySelector("#code-language");
+function selectedLanguage(role) {
+  const value = document.querySelector(`#${role}-language`)?.value;
+  return !value || value === "same" ? languageSelect.value : value;
+}
+function updateLanguage() {
+  const language = languageSelect.value;
+  document.querySelector("#language-badge").textContent = languageLabels[language];
+  document.querySelector("#candidate-label").textContent = `待验证的 ${languageLabels[language]} 程序`;
+  const hints = {
+    cpp: "C++20 · g++ -O2 · 单文件程序",
+    c: "C17 · gcc -O2 · 已链接数学库 libm",
+    python: "Python 3 · 先做语法检查 · 支持标准库 · 隔离模式运行",
+    java: "Java 17 · 使用 class Main 和 main 方法，不写 package · 堆上限 128 MiB",
+  };
+  const status = window.acmRuntimeStatus;
+  const unavailable = status?.executor === "local" && status.runtimes?.[language]?.available === false;
+  document.querySelector("#language-help").textContent = hints[language] + (unavailable ? " · 本机尚未安装此工具链，请参照 README 配置" : " · 切换语言后可载入对应示例");
+  const placeholders = { cpp: "#include <iostream>\nint main() {}", c: "#include <stdio.h>\nint main(void) { return 0; }", python: "print('Hello, ACM!')", java: "public class Main {\n    public static void main(String[] args) {}\n}" };
+  document.querySelector("#candidate-code").placeholder = placeholders[language];
+  updateMode();
+}
+window.addEventListener("acm-status", updateLanguage);
+for (const id of ["code-language", "reference-language", "generator-language"]) {
+  document.getElementById(id).addEventListener("change", updateLanguage);
+}
 
 function updateMode() {
   const mode = modeSelect.value;
@@ -18,18 +41,22 @@ function updateMode() {
   document.querySelector("#generator-code").required = mode === "stress";
   document.querySelector("#stdin-field").hidden = ["compile", "stress"].includes(mode);
   document.querySelectorAll(".stress-setting").forEach((element) => { element.hidden = mode !== "stress"; });
-  document.querySelector("#execute-button").textContent = { compile: "▶ 编译检查", run: "▶ 运行验证", compare: "▶ 差分测试", stress: "▶ 开始对拍" }[mode];
+  document.querySelector("#execute-button").textContent = { compile: languageSelect.value === "python" ? "▶ 语法检查" : "▶ 编译检查", run: "▶ 运行验证", compare: "▶ 差分测试", stress: "▶ 开始对拍" }[mode];
 }
 
-function loadExample() {
-  document.querySelector("#candidate-code").value = modeSelect.value === "run" || modeSelect.value === "compile" ? examples.reference : examples.candidate;
-  document.querySelector("#reference-code").value = examples.reference;
-  document.querySelector("#generator-code").value = examples.generator;
+async function loadExample() {
+  if (executing) return;
+  const examples = await examplesReady;
+  if (!examples) { resultPanel.textContent = "示例加载失败，请刷新页面后重试。"; return; }
+  const candidate = examples[languageSelect.value];
+  document.querySelector("#candidate-code").value = ["run", "compile"].includes(modeSelect.value) ? candidate.reference : candidate.candidate;
+  document.querySelector("#reference-code").value = examples[selectedLanguage("reference")].reference;
+  document.querySelector("#generator-code").value = examples[selectedLanguage("generator")].generator;
   document.querySelector("#stdin").value = "3\n-2 -5 -1\n";
   saveDraft();
 }
 
-const draftFields = ["candidate-code", "reference-code", "generator-code", "stdin", "execute-mode", "run-timeout", "iterations", "start-seed"];
+const draftFields = ["candidate-code", "reference-code", "generator-code", "stdin", "execute-mode", "run-timeout", "iterations", "start-seed", "code-language", "reference-language", "generator-language"];
 function saveDraft() {
   storage.set("acm-lab-draft", JSON.stringify(Object.fromEntries(draftFields.map((id) => [id, document.getElementById(id).value]))));
   if (lastExecution && !executing && !document.querySelector("#stale-result")) {
@@ -47,12 +74,17 @@ try {
   }
 } catch { /* An invalid browser draft should not prevent using the workspace. */ }
 if (!modeSelect.value) modeSelect.value = "run";
+if (!languageSelect.value) languageSelect.value = "cpp";
+for (const id of ["reference-language", "generator-language"]) {
+  if (!document.getElementById(id).value) document.getElementById(id).value = "same";
+}
 for (const id of draftFields) document.getElementById(id).addEventListener("input", saveDraft);
 modeSelect.addEventListener("change", updateMode);
 document.querySelector("#load-example").addEventListener("click", loadExample);
 document.addEventListener("click", (event) => {
   const button = event.target.closest("[data-lab]");
   if (!button) return;
+  if (executing) { showView("lab"); return; }
   modeSelect.value = button.dataset.lab;
   updateMode();
   if (!document.querySelector("#candidate-code").value) loadExample();
@@ -67,6 +99,7 @@ const verdicts = {
   TIME_LIMIT_EXCEEDED: ["运行超时", "failure"], OUTPUT_LIMIT_EXCEEDED: ["输出超出限制", "failure"],
   COMPILE_ERROR: ["编译失败", "failure"], COMPILE_TIMEOUT: ["编译超时", "failure"],
   RUNTIME_ERROR: ["运行错误", "failure"], SANDBOX_UNAVAILABLE: ["执行环境不可用", "warning"],
+  TOOLCHAIN_UNAVAILABLE: ["语言工具链不可用", "warning"],
 };
 
 function outputCard(title, value) {
@@ -92,16 +125,23 @@ function outputCard(title, value) {
 
 function renderResult(payload) {
   const result = payload.result;
-  const [label, tone] = verdicts[result.status] || [result.status, "failure"];
+  let [label, tone] = verdicts[result.status] || [result.status, "failure"];
+  if (result.status === "COMPILE_OK" && result.language === "python") label = "语法检查通过";
   resultPanel.replaceChildren();
   const heading = document.createElement("div");
   heading.className = `result-heading ${tone}`;
   const title = document.createElement("h3");
   title.textContent = label;
   const meta = document.createElement("span");
-  meta.textContent = `${result.status} · ${(payload.duration_ms / 1000).toFixed(2)}s`;
+  meta.textContent = `${languageLabels[payload.languages?.candidate] || ""} · ${result.status} · ${(payload.duration_ms / 1000).toFixed(2)}s`;
   heading.append(title, meta);
   resultPanel.append(heading);
+  if (payload.languages && ["compare", "stress"].includes(modeSelect.value)) {
+    const languages = document.createElement("p");
+    languages.className = "result-hint";
+    languages.textContent = `Candidate: ${languageLabels[payload.languages.candidate]} · Reference: ${languageLabels[payload.languages.reference]}` + (modeSelect.value === "stress" ? ` · Generator: ${languageLabels[payload.languages.generator]}` : "");
+    resultPanel.append(languages);
+  }
   if (result.seed !== undefined || result.test_number !== undefined) {
     const seed = document.createElement("p");
     seed.className = "result-hint";
@@ -114,6 +154,9 @@ function renderResult(payload) {
     if (result[key] !== undefined && (key !== "stderr" || result[key])) grid.append(outputCard(titleText, result[key]));
   }
   if (result.compile?.stderr && !result.stderr) grid.append(outputCard("编译诊断", result.compile.stderr));
+  for (const target of ["candidate", "reference", "generator"]) {
+    if (result[target]?.stderr) grid.append(outputCard(`${target} 诊断`, result[target].stderr));
+  }
   resultPanel.append(grid);
   const hint = document.createElement("p");
   hint.className = "result-hint";
@@ -135,6 +178,8 @@ executionForm.addEventListener("submit", async (event) => {
   executing = true;
   saveDraft();
   const request = {
+    language: languageSelect.value,
+    reference_language: selectedLanguage("reference"), generator_language: selectedLanguage("generator"),
     mode: modeSelect.value, code: document.querySelector("#candidate-code").value,
     reference_code: document.querySelector("#reference-code").value,
     generator_code: document.querySelector("#generator-code").value,
@@ -161,4 +206,4 @@ executionForm.addEventListener("submit", async (event) => {
   }
 });
 document.querySelector("#download-result").addEventListener("click", () => downloadJSON(lastExecution, "acm-verification.json"));
-updateMode();
+updateLanguage();

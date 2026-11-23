@@ -1,0 +1,22 @@
+{
+  "cpp": {
+    "candidate": "#include <iostream>\n#include <algorithm>\nint main() {\n    int n; std::cin >> n;\n    long long answer = 0, x; // 全为负数时，这个初值正确吗？\n    while (n--) {\n        std::cin >> x;\n        answer = std::max(answer, x);\n    }\n    std::cout << answer << \"\\n\";\n}\n",
+    "reference": "#include <iostream>\n#include <algorithm>\n#include <climits>\nint main() {\n    int n; std::cin >> n;\n    long long answer = LLONG_MIN, x;\n    while (n--) {\n        std::cin >> x;\n        answer = std::max(answer, x);\n    }\n    std::cout << answer << \"\\n\";\n}\n",
+    "generator": "#include <iostream>\n#include <random>\nint main() {\n    unsigned long long seed; std::cin >> seed;\n    std::mt19937_64 rng(seed);\n    std::cout << 5 << \"\\n\";\n    for (int i = 0; i < 5; ++i)\n        std::cout << -(int)(rng() % 100 + 1) << \" \";\n    std::cout << \"\\n\";\n}\n"
+  },
+  "python": {
+    "candidate": "import sys\n\ndata = list(map(int, sys.stdin.buffer.read().split()))\nn = data[0]\nanswer = 0  # 全负数时的错误初值\nfor x in data[1:n + 1]:\n    answer = max(answer, x)\nprint(answer)\n",
+    "reference": "import sys\n\ndata = list(map(int, sys.stdin.buffer.read().split()))\nn = data[0]\nprint(max(data[1:n + 1]))\n",
+    "generator": "seed = int(input())\nvalues = [-((seed % 100 * 17 + i * 23) % 100 + 1) for i in range(5)]\nprint(len(values))\nprint(*values)\n"
+  },
+  "c": {
+    "candidate": "#include <stdio.h>\nint main(void) {\n    int n;\n    if (scanf(\"%d\", &n) != 1) return 1;\n    long long answer = 0, x; /* 全负数时的错误初值 */\n    while (n--) {\n        if (scanf(\"%lld\", &x) != 1) return 1;\n        if (x > answer) answer = x;\n    }\n    printf(\"%lld\\n\", answer);\n    return 0;\n}\n",
+    "reference": "#include <stdio.h>\n#include <limits.h>\nint main(void) {\n    int n;\n    if (scanf(\"%d\", &n) != 1) return 1;\n    long long answer = LLONG_MIN, x;\n    while (n--) {\n        if (scanf(\"%lld\", &x) != 1) return 1;\n        if (x > answer) answer = x;\n    }\n    printf(\"%lld\\n\", answer);\n    return 0;\n}\n",
+    "generator": "#include <stdio.h>\nint main(void) {\n    unsigned long long seed;\n    if (scanf(\"%llu\", &seed) != 1) return 1;\n    puts(\"5\");\n    for (int i = 0; i < 5; ++i)\n        printf(\"%d \", -(int)((seed % 100 * 17 + i * 23) % 100 + 1));\n    puts(\"\");\n    return 0;\n}\n"
+  },
+  "java": {
+    "candidate": "import java.util.Scanner;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner in = new Scanner(System.in);\n        int n = in.nextInt();\n        long answer = 0; // 全负数时的错误初值\n        while (n-- > 0) answer = Math.max(answer, in.nextLong());\n        System.out.println(answer);\n    }\n}\n",
+    "reference": "import java.util.Scanner;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner in = new Scanner(System.in);\n        int n = in.nextInt();\n        long answer = Long.MIN_VALUE;\n        while (n-- > 0) answer = Math.max(answer, in.nextLong());\n        System.out.println(answer);\n    }\n}\n",
+    "generator": "import java.util.Scanner;\n\npublic class Main {\n    public static void main(String[] args) {\n        long seed = new Scanner(System.in).nextLong();\n        System.out.println(5);\n        for (int i = 0; i < 5; ++i)\n            System.out.print(-((seed % 100 * 17 + i * 23) % 100 + 1) + \" \");\n        System.out.println();\n    }\n}\n"
+  }
+}
